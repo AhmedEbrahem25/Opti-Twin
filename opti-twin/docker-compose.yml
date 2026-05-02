@@ -1,0 +1,117 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: opti-twin-redis
+    networks: [opti-twin-network]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  ai_engine:
+    build: ./ai_engine
+    container_name: opti-twin-ai
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - RL_ALPHA=${RL_ALPHA:-1.0}
+      - RL_BETA=${RL_BETA:-0.9}
+      - RL_GAMMA=${RL_GAMMA:-1.8}
+      - RL_DELTA=${RL_DELTA:-0.7}
+      - RL_EPSILON=${RL_EPSILON:-0.5}
+      - RL_ZETA=${RL_ZETA:-0.8}
+      - MACHINE_TYPE=EAF
+      - MODEL_PATH=/app/models/opti_twin_ppo.zip
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [opti-twin-network]
+
+  backend:
+    build: ./backend
+    container_name: opti-twin-backend
+    ports: ["8000:8000"]
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - AI_ENGINE_HOST=ai_engine
+      - DPE_ENABLED=${DPE_ENABLED:-true}
+      - DPE_MODE=${DPE_MODE:-sim_spot}
+      - DPE_PRICE_UPDATE_INTERVAL_SECONDS=${DPE_PRICE_UPDATE_INTERVAL_SECONDS:-60}
+      - DPE_FORECAST_UPDATE_INTERVAL_SECONDS=${DPE_FORECAST_UPDATE_INTERVAL_SECONDS:-1800}
+      - DPE_FORECAST_HORIZON_HOURS=${DPE_FORECAST_HORIZON_HOURS:-24}
+      - DPE_FORECAST_STEP_MINUTES=${DPE_FORECAST_STEP_MINUTES:-30}
+      - TOU_PEAK_START_HOUR=${TOU_PEAK_START_HOUR:-18.0}
+      - TOU_PEAK_END_HOUR=${TOU_PEAK_END_HOUR:-22.0}
+      - TOU_PEAK_RATE_EGP=${TOU_PEAK_RATE_EGP:-2.50}
+      - TOU_OFFPEAK_RATE_EGP=${TOU_OFFPEAK_RATE_EGP:-1.20}
+      - DPE_SPOT_PEAK_MULTIPLIER_MIN=${DPE_SPOT_PEAK_MULTIPLIER_MIN:-1.8}
+      - DPE_SPOT_PEAK_MULTIPLIER_MAX=${DPE_SPOT_PEAK_MULTIPLIER_MAX:-2.5}
+      - DPE_SPOT_OFFPEAK_MULTIPLIER=${DPE_SPOT_OFFPEAK_MULTIPLIER:-0.85}
+      - DPE_SPOT_NOISE_STD=${DPE_SPOT_NOISE_STD:-0.08}
+      - DPE_DR_ENABLED=${DPE_DR_ENABLED:-true}
+      - DPE_DR_MIN_DURATION_MINUTES=${DPE_DR_MIN_DURATION_MINUTES:-15}
+      - DPE_DR_CURTAILMENT_RATE_EGP=${DPE_DR_CURTAILMENT_RATE_EGP:-250}
+      - DPE_DR_INTERRUPTIBLE_RATE_EGP=${DPE_DR_INTERRUPTIBLE_RATE_EGP:-450}
+      - DPE_DR_FREQUENCY_RATE_EGP=${DPE_DR_FREQUENCY_RATE_EGP:-950}
+      - DPE_CAPACITY_CREDIT_RATE_EGP=${DPE_CAPACITY_CREDIT_RATE_EGP:-80}
+      - DPE_CONTRACTED_FLEXIBILITY_MW=${DPE_CONTRACTED_FLEXIBILITY_MW:-30}
+      - DPE_SCHEDULE_HORIZON_HOURS=${DPE_SCHEDULE_HORIZON_HOURS:-8}
+      - STEEL_REVENUE_PER_TONNE=${STEEL_REVENUE_PER_TONNE:-8400}
+      - STEEL_COST_PER_TONNE=${STEEL_COST_PER_TONNE:-6100}
+      - TARIFF_RATE_EGP_PER_KWH=${TARIFF_RATE_EGP_PER_KWH:-1.60}
+      - PF_REFERENCE=${PF_REFERENCE:-0.92}
+      - EAF_MAX_POWER_MW=${EAF_MAX_POWER_MW:-110}
+      - EAF_FURNACE_SIZE_T=${EAF_FURNACE_SIZE_T:-185}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [opti-twin-network]
+
+  simulator:
+    build: ./simulator
+    container_name: opti-twin-sim
+    environment:
+      - BACKEND_URL=http://backend:8000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - SIM_MACHINE=${SIM_MACHINE:-EAF_02_EZZ_AIN_SOKHNA}
+      - SIM_INTERVAL_SECONDS=${SIM_INTERVAL_SECONDS:-3}
+      - SIM_TIME_WARP_MINUTES=${SIM_TIME_WARP_MINUTES:-15}
+      - SIM_START_HOUR=${SIM_START_HOUR:-17.75}
+      - TARIFF_CLASS=${TARIFF_CLASS:-UHV_220-132kV}
+      - TARIFF_RATE_EGP_PER_KWH=${TARIFF_RATE_EGP_PER_KWH:-1.60}
+      - TOU_MODE_DEFAULT=${TOU_MODE_DEFAULT:-false}
+      - PF_REFERENCE=${PF_REFERENCE:-0.92}
+      - GRID_CO2_INTENSITY_KG_PER_KWH=${GRID_CO2_INTENSITY_KG_PER_KWH:-0.50}
+      - EAF_RATED_TPA=${EAF_RATED_TPA:-1600000}
+      - EAF_FURNACE_SIZE_T=${EAF_FURNACE_SIZE_T:-185}
+      - EAF_MAX_POWER_MW=${EAF_MAX_POWER_MW:-110}
+      - EAF_MIN_POWER_MW=${EAF_MIN_POWER_MW:-60}
+      - FURNACE_MAX_WALL_TEMP=${FURNACE_MAX_WALL_TEMP:-250}
+      - FURNACE_TARGET_BATH_TEMP=${FURNACE_TARGET_BATH_TEMP:-1630}
+      - DPE_ENABLED=${DPE_ENABLED:-true}
+      - DPE_MODE=${DPE_MODE:-sim_spot}
+    depends_on:
+      backend:
+        condition: service_started
+    networks: [opti-twin-network]
+
+  frontend:
+    build: ./frontend
+    container_name: opti-twin-frontend
+    ports: ["3000:3000"]
+    environment:
+      - NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+      - NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws/live-feed
+    depends_on:
+      backend:
+        condition: service_started
+    networks: [opti-twin-network]
+
+networks:
+  opti-twin-network:
+    driver: bridge

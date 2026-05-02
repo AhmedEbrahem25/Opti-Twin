@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:egyptera.org)",
+      "WebFetch(domain:www.gem.wiki)",
+      "WebFetch(domain:www.climatiq.io)",
+      "WebFetch(domain:worldsteel.org)",
+      "WebFetch(domain:www.iea.org)",
+      "PowerShell(Get-ChildItem -Path \"F:\\\\Projects\\\\NextCity AI 2026\" -Recurse -Force | Select-Object FullName | ForEach-Object { $_.FullName } | Sort-Object)",
+      "Bash(Get-ChildItem -Path \"F:\\\\Projects\\\\NextCity AI 2026\" -Recurse -File)",
+      "Bash(Select-Object FullName)",
+      "PowerShell(head *)",
+      "Bash(docker compose *)"
+    ]
+  }
+}

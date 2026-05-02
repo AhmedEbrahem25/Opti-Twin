@@ -1,0 +1,6 @@
+numpy==1.26.4
+gymnasium==0.29.1
+stable-baselines3==2.3.0
+torch==2.2.2
+redis==5.0.1
+pydantic==2.6.4

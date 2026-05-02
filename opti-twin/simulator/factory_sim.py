@@ -1,0 +1,285 @@
+"""
+Opti-Twin — Factory Simulator (Tier 1, Edge Layer)
+
+Drives an Electric Arc Furnace simulation, emits telemetry every
+SIM_INTERVAL_SECONDS to the backend over HTTP, and listens to a Redis
+control channel for AI recommendations and crisis-event injections.
+
+Verified anchors:
+  - Tariff: EgyptERA Aug 2024 (1.60 EGP/kWh UHV flat)
+  - Furnace: Ezz Flat Steel Ain Sokhna EAF #2 (Source: Global Energy Monitor)
+  - Energy intensity: 400-500 kWh/t typical (Source: World Steel Association)
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+import time
+import threading
+from datetime import datetime, timezone
+from typing import Any, Dict
+
+import redis
+import requests
+
+from machines.eaf_machine import EAFMachine, EAFState
+from machines.egypt_grid_pricing import EgyptGridPricing
+
+
+# ---------- Config ----------
+BACKEND_URL = os.getenv("BACKEND_URL", "http://backend:8000")
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+
+SIM_MACHINE = os.getenv("SIM_MACHINE", "EAF_02_EZZ_AIN_SOKHNA")
+SIM_INTERVAL_SECONDS = float(os.getenv("SIM_INTERVAL_SECONDS", "3"))
+SIM_TIME_WARP_MINUTES = float(os.getenv("SIM_TIME_WARP_MINUTES", "15"))
+SIM_START_HOUR = float(os.getenv("SIM_START_HOUR", "17.75"))
+
+TARIFF_CLASS = os.getenv("TARIFF_CLASS", "UHV_220-132kV")
+TARIFF_RATE_FALLBACK = float(os.getenv("TARIFF_RATE_EGP_PER_KWH", "1.60"))
+TOU_MODE_DEFAULT = os.getenv("TOU_MODE_DEFAULT", "false").lower() == "true"
+PF_REFERENCE = float(os.getenv("PF_REFERENCE", "0.92"))
+
+GRID_CO2_KG_PER_KWH = float(os.getenv("GRID_CO2_INTENSITY_KG_PER_KWH", "0.50"))
+EAF_RATED_TPA = int(os.getenv("EAF_RATED_TPA", "1600000"))
+EAF_FURNACE_SIZE_T = int(os.getenv("EAF_FURNACE_SIZE_T", "185"))
+
+
+# ---------- Setup ----------
+def make_machine() -> EAFMachine:
+    state = EAFState(
+        machine_id=SIM_MACHINE,
+        rated_capacity_tpa=EAF_RATED_TPA,
+        furnace_size_t=EAF_FURNACE_SIZE_T,
+    )
+    return EAFMachine(state)
+
+
+def make_pricing() -> EgyptGridPricing:
+    return EgyptGridPricing(tariff_class=TARIFF_CLASS, tou_mode=TOU_MODE_DEFAULT)
+
+
+def sim_time_now(start_hour: float, real_seconds_elapsed: float) -> float:
+    """Return current simulated hour-of-day in [0, 24)."""
+    sim_minutes_elapsed = real_seconds_elapsed * SIM_TIME_WARP_MINUTES
+    return (start_hour + sim_minutes_elapsed / 60.0) % 24.0
+
+
+# ---------- Telemetry payload ----------
+def build_telemetry(
+    machine: EAFMachine,
+    pricing: EgyptGridPricing,
+    sim_hour: float,
+) -> Dict[str, Any]:
+    s = machine.state
+    # Use live price from DPE broker if available, else fall back to local pricing
+    live_price, live_is_peak, live_label = get_live_price(sim_hour, pricing)
+    snap = pricing.price_at(sim_hour)
+    pf_penalty = pricing.power_factor_penalty_egp_per_hour(s.power_factor, s.arc_power_mw)
+    return {
+        "machine_id": s.machine_id,
+        "machine_type": "Electric Arc Furnace",
+        "factory": s.factory,
+        "manufacturer": s.manufacturer,
+        "rated_capacity_tpa": s.rated_capacity_tpa,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "sim_hour": round(sim_hour, 3),
+        # Electrical
+        "arc_power_mw": round(s.arc_power_mw, 2),
+        "energy_kwh": round(s.energy_kwh_today, 1),
+        "energy_this_heat_kwh": round(s.energy_this_heat_kwh, 1),
+        "power_factor": round(s.power_factor, 3),
+        "pf_penalty_bracket": s.power_factor < PF_REFERENCE,
+        "pf_penalty_egp_per_hour_est": round(pf_penalty, 1),
+        "reactive_power_comp_mvar": round(s.reactive_power_comp_mvar, 2),
+        "tap_changer_position": s.tap_changer_position,
+        # Thermal
+        "furnace_bath_temp": round(s.bath_temp_c, 1),
+        "electrode_temp": round(s.electrode_temp_c, 1),
+        "wall_panel_temp": round(s.wall_panel_temp_c, 1),
+        "cooling_water_outlet_temp": round(s.cooling_water_outlet_c, 1),
+        # Production
+        "heat_progress_pct": round(s.heat_progress_pct, 1),
+        "current_batch_weight": round(s.current_batch_weight, 1),
+        "batches_today": s.batches_today,
+        "production_backlog": s.production_backlog,
+        # Tariff (live price from DPE broker overrides local when active)
+        "electricity_price": round(live_price, 3),
+        "tariff_class": snap.tariff_class,
+        "tou_mode": snap.tou_mode,
+        "is_peak": live_is_peak,
+        "tariff_label": live_label,
+        # Grid
+        "grid_frequency": round(s.grid_frequency_hz, 3),
+        "grid_co2_kg_per_kwh": GRID_CO2_KG_PER_KWH,
+        # Electrodes
+        "electrode_position_mm": round(s.electrode_position_mm, 1),
+        "electrode_consumption_kg": round(s.electrode_consumption_rate_kg_per_min, 4),
+        "electrode_consumption_today_kg": round(s.electrode_consumption_today_kg, 2),
+        # Inputs
+        "oxygen_injection_m3hr": round(s.oxygen_injection_m3hr, 0),
+        "cooling_water_flow_lmin": round(s.cooling_water_flow_lmin, 0),
+        # Status
+        "status": s.phase.value,
+        "ai_active": s.ai_active,
+        "crisis_flags": {
+            "wall_overheat": s.crisis_wall_overheat,
+            "electrode_break": s.crisis_electrode_break,
+            "grid_spike": s.crisis_grid_spike,
+            "transformer_alarm": s.crisis_transformer_alarm,
+        },
+    }
+
+
+# ---------- Live price cache (updated by pricing.live subscriber) ----------
+_live_price_cache: dict = {}
+_live_price_lock = threading.Lock()
+
+
+def pricing_listener(r: redis.Redis) -> None:
+    """Subscribe to pricing.live to override local tariff when DPE mode is active."""
+    pubsub = r.pubsub()
+    pubsub.subscribe("pricing.live")
+    print("[sim] subscribed to pricing.live", flush=True)
+    for msg in pubsub.listen():
+        if msg.get("type") != "message":
+            continue
+        try:
+            data = json.loads(msg["data"])
+            with _live_price_lock:
+                _live_price_cache.update(data)
+        except Exception:
+            pass
+
+
+def get_live_price(sim_hour: float, pricing: EgyptGridPricing) -> tuple:
+    """Return (price_egp_kwh, is_peak, label) from cache or local pricing."""
+    with _live_price_lock:
+        if _live_price_cache and _live_price_cache.get("price_source", "flat") != "flat":
+            return (
+                _live_price_cache.get("price_egp_kwh", TARIFF_RATE_FALLBACK),
+                _live_price_cache.get("is_peak", False),
+                _live_price_cache.get("label", "Dynamic"),
+            )
+    snap = pricing.price_at(sim_hour)
+    return snap.rate_egp_per_kwh, snap.is_peak, snap.label
+
+
+# ---------- Control channel listener ----------
+def control_listener(machine: EAFMachine, pricing: EgyptGridPricing, r: redis.Redis) -> None:
+    """Listen to sim.control channel for AI recommendations & crisis injections."""
+    pubsub = r.pubsub()
+    pubsub.subscribe("sim.control")
+    print("[sim] Control listener subscribed to sim.control", flush=True)
+    for msg in pubsub.listen():
+        if msg.get("type") != "message":
+            continue
+        try:
+            data = json.loads(msg["data"])
+        except Exception as exc:
+            print(f"[sim] bad control msg: {exc}", flush=True)
+            continue
+        action = data.get("action")
+        if action == "inject":
+            event = data.get("event", "")
+            machine.inject_event(event)
+            print(f"[sim] injected event: {event}", flush=True)
+        elif action == "ai_toggle":
+            if data.get("enabled"):
+                machine.state.ai_active = True
+            else:
+                machine.clear_ai()
+            print(f"[sim] ai_active={machine.state.ai_active}", flush=True)
+        elif action == "ai_recommendation":
+            rec = data.get("recommendation", {})
+            machine.apply_ai_recommendation(
+                arc_power_mw=rec.get("arc_power_mw"),
+                cooling_lmin=rec.get("cooling_lmin"),
+                reactive_comp_mvar=rec.get("reactive_comp_mvar"),
+            )
+        elif action == "tou_mode":
+            pricing.set_tou_mode(bool(data.get("enabled")))
+            print(f"[sim] tou_mode={pricing.tou_mode}", flush=True)
+
+
+# ---------- Main loop ----------
+def main() -> None:
+    print(f"[sim] starting Opti-Twin EAF simulator: {SIM_MACHINE}", flush=True)
+    print(f"[sim] tariff: {TARIFF_CLASS} @ {TARIFF_RATE_FALLBACK} EGP/kWh, TOU={TOU_MODE_DEFAULT}", flush=True)
+    print(f"[sim] interval={SIM_INTERVAL_SECONDS}s, time-warp={SIM_TIME_WARP_MINUTES}min/sec", flush=True)
+
+    machine = make_machine()
+    pricing = make_pricing()
+
+    # Wait briefly for Redis & backend to come up
+    for attempt in range(20):
+        try:
+            r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+            r.ping()
+            print(f"[sim] connected to Redis at {REDIS_HOST}:{REDIS_PORT}", flush=True)
+            break
+        except Exception as exc:
+            print(f"[sim] redis not ready ({exc}), retry {attempt+1}/20", flush=True)
+            time.sleep(2)
+    else:
+        print("[sim] FATAL: cannot reach Redis", flush=True)
+        sys.exit(1)
+
+    # Spawn control listener + pricing listener
+    threading.Thread(target=control_listener, args=(machine, pricing, r), daemon=True).start()
+    threading.Thread(target=pricing_listener, args=(r,), daemon=True).start()
+
+    start_real = time.time()
+    tick = 0
+    while True:
+        loop_start = time.time()
+        real_elapsed = loop_start - start_real
+        sim_hour = sim_time_now(SIM_START_HOUR, real_elapsed)
+
+        # Step the machine forward
+        machine.step(SIM_INTERVAL_SECONDS, SIM_TIME_WARP_MINUTES)
+
+        # Build telemetry
+        payload = build_telemetry(machine, pricing, sim_hour)
+
+        # Publish to Redis
+        try:
+            r.publish("factory.telemetry", json.dumps(payload))
+        except Exception as exc:
+            print(f"[sim] redis publish failed: {exc}", flush=True)
+
+        # Push to backend (best-effort)
+        try:
+            requests.post(
+                f"{BACKEND_URL}/api/v1/telemetry",
+                json=payload,
+                timeout=2.0,
+            )
+        except Exception:
+            pass
+
+        if tick % 5 == 0:
+            print(
+                f"[sim] t={sim_hour:5.2f}h phase={machine.state.phase.value:18s} "
+                f"P={machine.state.arc_power_mw:5.1f}MW "
+                f"bath={machine.state.bath_temp_c:6.1f}°C "
+                f"wall={machine.state.wall_panel_temp_c:5.1f}°C "
+                f"PF={machine.state.power_factor:.2f} "
+                f"price={payload['electricity_price']:.2f}EGP/kWh",
+                flush=True,
+            )
+        tick += 1
+
+        elapsed = time.time() - loop_start
+        sleep_for = max(0.0, SIM_INTERVAL_SECONDS - elapsed)
+        time.sleep(sleep_for)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("[sim] stopped by user", flush=True)

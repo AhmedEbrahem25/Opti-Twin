@@ -1,0 +1,44 @@
+{
+  "source": "EgyptERA — Current Electricity Tariff, August 2024",
+  "source_url": "https://egyptera.org/en/TarrifAug2024.aspx",
+  "currency": "EGP",
+  "unit": "EGP/kWh",
+  "valid_from": "2024-08-01",
+  "valid_to": null,
+  "power_factor_reference": 0.92,
+  "customer_service_fee_egp_per_month": 35.0,
+  "tariff_classes": {
+    "UHV_220-132kV": {
+      "label": "Ultra/Extra High Voltage",
+      "rate_egp_per_kwh": 1.60,
+      "tou_split": null
+    },
+    "HV_66-33kV": {
+      "label": "High Voltage",
+      "rate_egp_per_kwh": 1.74,
+      "tou_split": null
+    },
+    "MV_22-11kV": {
+      "label": "Medium Voltage",
+      "rate_egp_per_kwh": 1.94,
+      "tou_split": null
+    }
+  },
+  "future_tou_proposal": {
+    "source": "Ahmed et al., GUC Working Paper #29 — Designing a Prudent Peak Load Pricing Model",
+    "source_url": "https://ideas.repec.org/p/guc/wpaper/29.html",
+    "note": "Forward-looking; not currently in force for industrial UHV.",
+    "schedule": [
+      {"start": "00:00", "end": "06:00", "rate_egp_per_kwh": 1.00, "label": "Off-peak"},
+      {"start": "06:00", "end": "18:00", "rate_egp_per_kwh": 1.50, "label": "Normal"},
+      {"start": "18:00", "end": "22:00", "rate_egp_per_kwh": 2.50, "label": "Peak"},
+      {"start": "22:00", "end": "24:00", "rate_egp_per_kwh": 1.80, "label": "Semi-peak"}
+    ]
+  },
+  "power_factor_penalty": {
+    "source": "EgyptERA tariff doc + ResearchGate — Power factor and your electrical utility bill in Egypt",
+    "applies_to": "Industrial loads > 500 kW",
+    "reference_pf": 0.92,
+    "note": "Penalty escalates after 3 months below reference; supply termination after 6 months."
+  }
+}
