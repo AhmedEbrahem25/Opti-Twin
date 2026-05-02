@@ -30,9 +30,10 @@
 18. [7-Day Execution Plan (Demo-Critical Slice)](#18-7-day-execution-plan-demo-critical-slice)
 19. [Post-Hackathon Roadmap](#19-post-hackathon-roadmap)
 20. [Risk Register](#20-risk-register)
-21. [Appendix A — Sample Queries](#21-appendix-a--sample-queries)
-22. [Appendix B — Document JSON Schemas](#22-appendix-b--document-json-schemas)
-23. [Appendix C — Glossary](#23-appendix-c--glossary)
+21. [Dynamic Pricing Engine — Search Integration](#21-dynamic-pricing-engine--search-integration)
+22. [Appendix A — Sample Queries](#22-appendix-a--sample-queries)
+23. [Appendix B — Document JSON Schemas](#23-appendix-b--document-json-schemas)
+24. [Appendix C — Glossary](#24-appendix-c--glossary)
 
 ---
 
@@ -87,6 +88,9 @@ Plant operators are drowning in time-series data and starved of **context**. The
 | "Which model version produced last Tuesday's record-low PF penalty?" | Ask the ML lead | Filter by `model_version` + KPI threshold |
 | "Show all heats in the last 30 days where bath dropped below 1500 °C" | Manual SQL through DBA | Saved search, run on demand |
 | "Did the synthetic preference oracle (M5) ever flip its rating on the same trajectory?" | Re-run training | Index + diff |
+| "Show all DR events we accepted last month and total payments earned" | Manual KPI spreadsheet | Single structured query |
+| "When did the spot price last exceed 2.40 EGP and what did the AI do?" | Impossible today | Hybrid query: `pricing_event` + correlated `decision` |
+| "Find every hour the AI fired PRE_PEAK_DROP but the forecast was wrong (price actually dropped)" | Cross-ref two CSVs | Filter + join by ts window |
 
 Each one is the kind of question that, today, takes minutes-to-hours and frequently goes unasked. A search surface compresses them to seconds.
 
@@ -168,6 +172,12 @@ A flat list, with each row tagged by phase: **D** = demo-critical (in the 7-day 
 | F26 | Per-shift digest email at handover | R |
 | F27 | OpenSearch / Meilisearch dual-write for graceful migration | R |
 | F28 | Compliance pack (read-only audit URL valid for N days, signed) | R |
+| F29 | **DPE** — `pricing_event` document type indexed in real-time (DR events, price spikes, forecast updates) | D |
+| F30 | **DPE** — Structured filters on `price_egp_kwh`, `is_peak`, `dr_type`, `dr_status` | D |
+| F31 | **DPE** — Price-timeline overlay: search results annotate the EnergyChart with matching price events | R |
+| F32 | **DPE** — Revenue attribution search: "show all decisions that contributed to this DR payment" (cross-doc) | R |
+| F33 | **DPE** — Forecast accuracy report search: "find heats where forecast error >20%" | R |
+| F34 | **DPE** — Saved search: "alert me when a FREQUENCY_RESPONSE event is accepted" (real-money signal) | D |
 
 ---
 
@@ -259,6 +269,7 @@ Eight document types ship across phases. Each is **already produced** by other p
 | T6 | `kpi_snapshot` (per-shift, per-day rollups) | `backend.kpi.aggregator` | R | 4–24 | ~2 KB |
 | T7 | `tariff_event` (TOU mode change, rate update) | external feed / mock | R | <1 | ~1 KB |
 | T8 | `operator_note` (manual annotation) | dashboard | R | ~10–50 | ~0.5 KB |
+| T9 | `pricing_event` (DR events, price spikes, forecast updates, mode changes) | `backend.pricing.*` | D | ~50–200 | ~1.0 KB |
 
 ### 6.1 Common envelope (every doc)
 
@@ -399,6 +410,16 @@ synonyms:
   - [pre_peak_drop, "خفض ما قبل الذروة"]
   - [reduce_arc_power, "خفض قدرة القوس"]
   - [emergency_cooling, "تبريد طارئ"]
+  - [dr, demand response, "استجابة الطلب"]
+  - [curtailment, "تخفيض الحمل"]
+  - [interruptible, "قابل للمقاطعة"]
+  - [frequency response, "استجابة التردد"]
+  - [spot price, spot market, "سعر السوق الفوري"]
+  - [tou, time-of-use, peak tariff, "تعريفة الذروة"]
+  - [capacity credit, "رصيد الطاقة الاحتياطية"]
+  - [revenue, earnings, savings, "الإيرادات", "الوفورات"]
+  - [price spike, price surge, "ارتفاع السعر"]
+  - [dpe, dynamic pricing engine, "محرك التسعير الديناميكي"]
 ```
 
 Meilisearch ingests this directly; the same file feeds the NL parser's vocabulary.
@@ -886,10 +907,190 @@ A 12-week plan for everything labelled R (and selected F) above.
 | SR10 | Judges ask for a feature on the F-list during Q&A | H × L | "On the post-hackathon roadmap, here's the design" — point to §19 |
 | SR11 | Saved-search banner hides a more critical alarm | L × H | Z-index ordering: alarms always above; banner is `info` styled |
 | SR12 | RBAC misconfiguration in demo environment leaks all docs to all users | L × H | Demo runs single-tenant with one role; multi-tenant gated behind `ENABLE_RBAC=true` |
+| SR13 | DPE price events flood the index during volatile spot market simulation | M × M | Rate-limit indexer to 1 event per 30-second bucket per machine; drop duplicates by price hash |
+| SR14 | DR event search returns stale PENDING records | L × M | Index only terminal states (ACCEPTED / REJECTED); PENDING events are upserted on state change |
 
 ---
 
-## 21. Appendix A — Sample Queries
+## 21. Dynamic Pricing Engine — Search Integration
+
+The **Dynamic Pricing Engine (DPE)** — already implemented in `backend/pricing/` — produces a rich stream of financial events that operators and energy managers need to retrieve and correlate. This section defines how those events are indexed and queried.
+
+### 21.1 Why DPE events need dedicated search
+
+The DPE generates three Redis channels:
+
+| Channel | Volume | Searchable value |
+|---------|--------|-----------------|
+| `pricing.live` | 1 msg/60 s | Spot price history; peak transitions; DR activations |
+| `pricing.forecast` | 1 msg/30 min | Forecast accuracy audit (forecast vs. actual) |
+| `pricing.control` | Low | Mode changes (flat → spot → TOU) |
+
+Today those events are ephemeral — they exist only in the live dashboard. Indexing them creates a **financial audit trail**: every price signal the AI acted on becomes retrievable and queryable days or weeks later.
+
+### 21.2 `pricing_event` document type
+
+The indexer subscribes to all three pricing channels and normalises each into a common `pricing_event` envelope:
+
+```python
+class PricingEventDoc(SearchDoc):
+    type: Literal["pricing_event"]
+    payload: PricingEventPayload
+
+class PricingEventPayload(BaseModel):
+    event_kind: Literal[
+        "price_tick",       # regular live price update
+        "peak_start",       # is_peak flipped True
+        "peak_end",         # is_peak flipped False
+        "price_spike",      # price > 2×baseline in single tick
+        "dr_event",         # DR event lifecycle (inject → accepted/rejected)
+        "forecast_update",  # new 24h forecast published
+        "mode_change",      # DPE_MODE changed
+    ]
+    price_egp_kwh: float | None
+    is_peak: bool | None
+    price_source: str | None        # "flat" | "sim_tou" | "sim_spot" | "live_eehc"
+    dr_event_id: str | None
+    dr_type: str | None             # "CURTAILMENT" | "INTERRUPTIBLE" | "FREQUENCY_RESPONSE"
+    dr_status: str | None           # "PENDING" | "ACCEPTED" | "REJECTED"
+    dr_mw: float | None
+    dr_payment_egp: float | None
+    dr_net_benefit_egp: float | None
+    forecast_p50_max: float | None  # peak of the new forecast
+    forecast_p50_min: float | None
+    mode_from: str | None
+    mode_to: str | None
+    correlated_decision_ids: list[str]  # decisions fired within ±15s of this event
+```
+
+**Tag policy for `pricing_event`:**
+
+| Condition | Tags added |
+|-----------|-----------|
+| `event_kind = peak_start` | `["peak", "tou", "high_price"]` |
+| `event_kind = price_spike` | `["spike", "peak", "high_price"]` |
+| `dr_status = ACCEPTED` | `["dr", "dr_accepted", dr_type.lower()]` |
+| `dr_status = REJECTED` | `["dr", "dr_rejected"]` |
+| `event_kind = mode_change` | `["config", "dpe_mode"]` |
+
+### 21.3 Indexing pipeline — DPE extension
+
+```
+pricing.live  ──┐
+pricing.forecast─┤  XREADGROUP opti-search (extended)
+pricing.control ─┘         │
+                            ▼
+                   ┌─────────────────────┐
+                   │ DPEEventNormaliser  │  (new indexer module)
+                   │  - dedup by price+ts│
+                   │  - tag assignment   │
+                   │  - correlate to     │
+                   │    nearby decisions │
+                   └────────┬────────────┘
+                            │
+                   ┌────────▼────────────┐   ┌──────────────┐
+                   │  Postgres upsert    │──►│  Meilisearch │
+                   │  pricing_events     │   │  upsert      │
+                   └─────────────────────┘   └──────────────┘
+```
+
+**Correlation logic:** when a `dr_event` or `price_spike` is indexed, the normaliser looks up decisions fired in the window `[event_ts − 15s, event_ts + 15s]` from the decisions table and populates `correlated_decision_ids`. This enables "show me what the AI did when this DR event arrived."
+
+### 21.4 Filter grammar additions (DPE-specific)
+
+Standard filter grammar from §8.5 extended with DPE fields:
+
+```
+# All accepted DR events
+type=pricing_event, event_kind=dr_event, dr_status=ACCEPTED
+
+# Accepted FREQUENCY_RESPONSE events (highest-value)
+type=pricing_event, dr_type=FREQUENCY_RESPONSE, dr_status=ACCEPTED
+
+# Every peak-start event in the last 7 days
+type=pricing_event, event_kind=peak_start, ts:[now-7d,now]
+
+# Spot price spikes above 2.30 EGP
+type=pricing_event, event_kind=price_spike, price_egp_kwh:>2.30
+
+# Mode changes (config auditing)
+type=pricing_event, event_kind=mode_change
+```
+
+### 21.5 Revenue attribution search (F32 — Roadmap)
+
+A future cross-document query links `pricing_event` DR payments back to the specific `decision` records that made them possible:
+
+```
+GET /search/revenue-attribution?dr_event_id=DR_20260503_001
+```
+
+Returns:
+- The DR event doc (payment, MW, duration)
+- All correlated `decision` docs (REDUCE_ARC_POWER fired at accepted MW)
+- The `episode` the decisions belong to
+- Net benefit calculation (payment − production_cost)
+
+This turns the DPE's `net_benefit_egp` field from a single number into an **auditable decision trail**.
+
+### 21.6 DPE command-palette interactions
+
+Example `Ctrl + K` flows added by this feature:
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  🔍  demand response                                   ⌘K      │
+├────────────────────────────────────────────────────────────────┤
+│  ⚡  DR Accepted — FREQUENCY_RESPONSE 30 MW @ 18:44            │
+│      pricing_event · +950 EGP/MWh · net +712 EGP · 30 min     │
+│      Correlated: REDUCE_ARC_POWER ×3 (18:44–18:47)            │
+│  ────────────────────────────────────────────────────────────  │
+│  ⚡  DR Rejected — CURTAILMENT @ 17:52                         │
+│      pricing_event · Phase: BORE_DOWN (unsafe) · declined      │
+│  ────────────────────────────────────────────────────────────  │
+│  📈  Price spike — 2.43 EGP @ 18:00 (peak_start)              │
+│      pricing_event · is_peak=True · sim_spot mode              │
+└────────────────────────────────────────────────────────────────┘
+```
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  🔍  سعر الكهرباء فوق 2.40                             ⌘K      │
+├────────────────────────────────────────────────────────────────┤
+│  ⚡  ارتفاع سعر — 2.43 جنيه/كيلوواط · 18:00                   │
+│      pricing_event · ذروة نشطة · مصدر: السوق الفوري           │
+│  ⚡  ارتفاع سعر — 2.41 جنيه/كيلوواط · 19:30                   │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### 21.7 DPE saved-search presets (F34 — Demo)
+
+Two presets ship with the demo:
+
+| Name | Query | Alert |
+|------|-------|-------|
+| **"High-value DR accepted"** | `type=pricing_event, dr_type=FREQUENCY_RESPONSE, dr_status=ACCEPTED` | Banner + sound |
+| **"Price spike alert"** | `type=pricing_event, event_kind=price_spike, price_egp_kwh:>2.20` | Banner |
+
+These trigger the `SavedSearchBanner` component in real time as the simulator runs — giving the demo a live "price spike detected" moment without any manual injection.
+
+### 21.8 DPE search — revenue dashboard integration
+
+The `/search/revenue-attribution` endpoint feeds a new **Revenue Audit** tab in the DynamicPricingPanel (post-hackathon):
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  REVENUE AUDIT                                              │
+│  DR_20260503_001  FREQUENCY_RESPONSE  +712 EGP net         │
+│  ├── REDUCE_ARC_POWER ×3 (18:44–18:47)  [view decisions]   │
+│  ├── Production impact: 0 heats delayed                     │
+│  └── Forecast accuracy: predicted 2.48, actual 2.43 (−2%)  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 22. Appendix A — Sample Queries
 
 Copy-pasteable, intended for the demo dry-runs and the smoke test on D6.
 
@@ -917,15 +1118,47 @@ q=transformer alarm&types=operator_note
 
 # 8) Audit export for the EU CBAM auditor (R-phase)
 GET /search/export?from=2026-01-01&to=2026-12-31&types=kpi_snapshot,episode&format=pdf
+
+# ── Dynamic Pricing Engine queries ──────────────────────────────────────────
+
+# 9) All accepted DR events this week
+q=&types=pricing_event&filters=event_kind=dr_event,dr_status=ACCEPTED,ts:[now-7d,now]
+
+# 10) High-value frequency response events (950 EGP/MWh)
+q=&types=pricing_event&filters=dr_type=FREQUENCY_RESPONSE,dr_status=ACCEPTED
+
+# 11) Price spikes above 2.20 EGP today
+q=&types=pricing_event&filters=event_kind=price_spike,price_egp_kwh:>2.20,ts:[now-24h,now]
+
+# 12) Arabic DPE query — "استجابة الطلب" maps to all DR events
+q=استجابة الطلب&types=pricing_event
+
+# 13) What did the AI do when the last price spike hit? (cross-type)
+q=&types=pricing_event,decision&filters=event_kind=price_spike,ts:[now-1h,now]
+
+# 14) Find every PRE_PEAK_DROP + the pricing event that triggered it
+q=&types=decision,pricing_event&filters=action_label=PRE_PEAK_DROP,ts:[now-24h,now]
+
+# 15) DR events rejected (unsafe phase) — why did we leave money on the table?
+q=&types=pricing_event&filters=dr_status=REJECTED,ts:[now-7d,now]
+
+# 16) DPE mode changes log (config audit)
+q=&types=pricing_event&filters=event_kind=mode_change
+
+# 17) Revenue attribution for a specific DR event (R-phase endpoint)
+GET /search/revenue-attribution?dr_event_id=DR_20260503_001
+
+# 18) NL: "when did we earn the most from demand response last week" (R)
+POST /search/nl  body={"text":"when did we earn the most from demand response last week"}
 ```
 
 ---
 
-## 22. Appendix B — Document JSON Schemas
+## 23. Appendix B — Document JSON Schemas
 
 Type-specific payloads. Common envelope from §6.1 omitted for brevity.
 
-### 22.1 `decision`
+### 23.1 `decision`
 
 ```json
 {
@@ -948,7 +1181,7 @@ Type-specific payloads. Common envelope from §6.1 omitted for brevity.
 }
 ```
 
-### 22.2 `crisis`
+### 23.2 `crisis`
 
 ```json
 {
@@ -964,7 +1197,7 @@ Type-specific payloads. Common envelope from §6.1 omitted for brevity.
 }
 ```
 
-### 22.3 `episode`
+### 23.3 `episode`
 
 ```json
 {
@@ -984,7 +1217,7 @@ Type-specific payloads. Common envelope from §6.1 omitted for brevity.
 }
 ```
 
-### 22.4 `telemetry_anomaly` (R)
+### 23.4 `telemetry_anomaly` (R)
 
 ```json
 {
@@ -999,7 +1232,7 @@ Type-specific payloads. Common envelope from §6.1 omitted for brevity.
 }
 ```
 
-### 22.5 `model_version` (R)
+### 23.5 `model_version` (R)
 
 ```json
 {
@@ -1014,7 +1247,7 @@ Type-specific payloads. Common envelope from §6.1 omitted for brevity.
 }
 ```
 
-### 22.6 `kpi_snapshot` (R)
+### 23.6 `kpi_snapshot` (R)
 
 ```json
 {
@@ -1030,7 +1263,7 @@ Type-specific payloads. Common envelope from §6.1 omitted for brevity.
 }
 ```
 
-### 22.7 `tariff_event` (R)
+### 23.7 `tariff_event` (R)
 
 ```json
 {
@@ -1043,7 +1276,89 @@ Type-specific payloads. Common envelope from §6.1 omitted for brevity.
 }
 ```
 
-### 22.8 `operator_note` (R)
+### 23.8 `pricing_event` (D — DPE)
+
+**Price tick (regular):**
+```json
+{
+  "type": "pricing_event",
+  "payload": {
+    "event_kind": "price_tick",
+    "price_egp_kwh": 1.847,
+    "is_peak": false,
+    "price_source": "sim_spot",
+    "dr_event_id": null,
+    "correlated_decision_ids": []
+  }
+}
+```
+
+**DR event accepted:**
+```json
+{
+  "type": "pricing_event",
+  "payload": {
+    "event_kind": "dr_event",
+    "price_egp_kwh": 2.431,
+    "is_peak": true,
+    "price_source": "sim_spot",
+    "dr_event_id": "DR_20260503_001",
+    "dr_type": "FREQUENCY_RESPONSE",
+    "dr_status": "ACCEPTED",
+    "dr_mw": 30.0,
+    "dr_payment_egp": 475.0,
+    "dr_net_benefit_egp": 712.0,
+    "correlated_decision_ids": ["01HXY01", "01HXY02", "01HXY03"]
+  }
+}
+```
+
+**Peak transition:**
+```json
+{
+  "type": "pricing_event",
+  "payload": {
+    "event_kind": "peak_start",
+    "price_egp_kwh": 2.43,
+    "is_peak": true,
+    "price_source": "sim_spot",
+    "dr_event_id": null,
+    "correlated_decision_ids": ["01HXY04"]
+  }
+}
+```
+
+**Forecast update:**
+```json
+{
+  "type": "pricing_event",
+  "payload": {
+    "event_kind": "forecast_update",
+    "forecast_p50_max": 2.50,
+    "forecast_p50_min": 1.35,
+    "price_source": "sim_spot",
+    "dr_event_id": null,
+    "correlated_decision_ids": []
+  }
+}
+```
+
+**Mode change:**
+```json
+{
+  "type": "pricing_event",
+  "payload": {
+    "event_kind": "mode_change",
+    "mode_from": "flat",
+    "mode_to": "sim_spot",
+    "price_source": "sim_spot",
+    "dr_event_id": null,
+    "correlated_decision_ids": []
+  }
+}
+```
+
+### 23.9 `operator_note` (R)
 
 ```json
 {

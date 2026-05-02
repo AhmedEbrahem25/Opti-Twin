@@ -30,26 +30,59 @@ export default function KPIBanner({
       ? "text-amber-400"
       : "text-emerald-400";
 
-  const costNow = t ? t.arc_power_mw * 1000 * t.electricity_price : 0; // EGP/hour
+  const cf = t?.crisis_flags;
+  const anyCrisis = cf && (cf.wall_overheat || cf.electrode_break || cf.grid_spike || cf.transformer_alarm);
+
+  // Derive a crisis label for the Health card sub-line
+  const crisisLabel = cf
+    ? cf.wall_overheat ? "🚨 Wall Overheat"
+    : cf.electrode_break ? "🚨 Electrode Break"
+    : cf.grid_spike ? "🚨 Grid Hz Spike"
+    : cf.transformer_alarm ? "🚨 Transformer Alarm"
+    : null
+    : null;
+
+  const costNow = t ? t.arc_power_mw * 1000 * t.electricity_price : 0;
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
       <Card title="💰 Saved Today" value={`${fmt(egpSavedToday, 0)} EGP`} sub="modelled" />
-      <Card title="⚡ Cost Now" value={`${fmt(costNow, 0)} EGP/hr`} sub={`@ ${t?.electricity_price?.toFixed(2) ?? "—"} EGP/kWh`} />
-      <Card title="🌡️ Bath Temp" value={`${fmt(t?.furnace_bath_temp ?? 0, 0)} °C`} sub="target 1,600–1,650" />
-      <Card title="🔌 Power Factor" value={t ? t.power_factor.toFixed(2) : "—"} sub={pfBracket ? "⚠ penalty bracket" : "✓ above 0.92"} valueClass={pfBracket ? "text-amber-400" : "text-emerald-400"} />
-      <Card title="🏭 Health" value={health} sub={lastRec?.production_status || "—"} valueClass={healthColor} />
+      <Card
+        title="⚡ Cost Now"
+        value={`${fmt(costNow, 0)} EGP/hr`}
+        sub={`@ ${t?.electricity_price?.toFixed(2) ?? "—"} EGP/kWh`}
+        pulse={cf?.grid_spike}
+      />
+      <Card
+        title="🌡️ Bath Temp"
+        value={`${fmt(t?.furnace_bath_temp ?? 0, 0)} °C`}
+        sub="target 1,600–1,650"
+        pulse={cf?.wall_overheat}
+        valueClass={cf?.wall_overheat ? "text-red-400" : undefined}
+      />
+      <Card
+        title="🔌 Power Factor"
+        value={t ? t.power_factor.toFixed(2) : "—"}
+        sub={pfBracket ? "⚠ penalty bracket" : "✓ above 0.92"}
+        valueClass={pfBracket ? "text-amber-400" : "text-emerald-400"}
+      />
+      <Card
+        title="🏭 Health"
+        value={anyCrisis ? "CRISIS" : health}
+        sub={crisisLabel ?? lastRec?.production_status ?? "—"}
+        valueClass={anyCrisis ? "text-red-400 animate-pulse" : healthColor}
+      />
       <Card title="♻️ CO₂ Saved" value={`${fmt(co2SavedKg, 1)} kg`} sub="today" />
     </div>
   );
 }
 
-function Card({ title, value, sub, valueClass }: { title: string; value: string; sub?: string; valueClass?: string }) {
+function Card({ title, value, sub, valueClass, pulse }: { title: string; value: string; sub?: string; valueClass?: string; pulse?: boolean }) {
   return (
-    <div className="glass rounded-xl p-3">
+    <div className={`glass rounded-xl p-3 ${pulse ? "ring-1 ring-red-500/60" : ""}`}>
       <div className="text-xs text-steel-100/60 uppercase tracking-wide">{title}</div>
-      <div className={`text-xl font-semibold mt-1 ${valueClass ?? "text-white"}`}>{value}</div>
-      {sub && <div className="text-xs text-steel-100/50 mt-0.5">{sub}</div>}
+      <div className={`text-xl font-semibold mt-1 ${pulse ? "animate-pulse" : ""} ${valueClass ?? "text-white"}`}>{value}</div>
+      {sub && <div className={`text-xs mt-0.5 ${pulse ? "text-red-400/70" : "text-steel-100/50"}`}>{sub}</div>}
     </div>
   );
 }

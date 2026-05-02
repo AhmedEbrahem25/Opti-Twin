@@ -34,4 +34,23 @@ export const api = {
   getDREvents: () => get("/api/v1/pricing/dr/events"),
   injectDREvent: (event_type: string, mw_requested: number, duration_minutes: number) =>
     post("/api/v1/pricing/dr/inject", { event_type, mw_requested, duration_minutes }),
+
+  // Pricing Event Search
+  searchPricingEvents: (params: {
+    q?: string;
+    event_kind?: string;
+    dr_status?: string;
+    dr_type?: string;
+    is_peak?: boolean;
+    limit?: number;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params.q) qs.set("q", params.q);
+    if (params.event_kind) qs.set("event_kind", params.event_kind);
+    if (params.dr_status) qs.set("dr_status", params.dr_status);
+    if (params.dr_type) qs.set("dr_type", params.dr_type);
+    if (params.is_peak !== undefined) qs.set("is_peak", String(params.is_peak));
+    if (params.limit) qs.set("limit", String(params.limit));
+    return get(`/api/v1/pricing/events/search?${qs.toString()}`);
+  },
 };

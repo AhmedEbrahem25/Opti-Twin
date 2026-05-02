@@ -8,6 +8,7 @@ import EAFStatusCard from "../components/EAFStatusCard";
 import XAIDecisionLog from "../components/XAIDecisionLog";
 import Controls from "../components/Controls";
 import DynamicPricingPanel from "../components/DynamicPricingPanel";
+import PricingEventLog from "../components/PricingEventLog";
 
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -76,6 +77,8 @@ export default function Dashboard() {
         <Controls />
 
         <DynamicPricingPanel livePrice={frame.livePrice} />
+
+        <PricingEventLog />
 
         <footer className="text-center text-xs text-steel-100/40 mt-6 py-4 border-t border-white/5">
           Tariff: <strong>1.60 EGP/kWh UHV flat</strong> (EgyptERA Aug 2024) ·

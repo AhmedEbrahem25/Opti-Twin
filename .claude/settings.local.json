@@ -11,7 +11,11 @@
       "Bash(Get-ChildItem -Path \"F:\\\\Projects\\\\NextCity AI 2026\" -Recurse -File)",
       "Bash(Select-Object FullName)",
       "PowerShell(head *)",
-      "Bash(docker compose *)"
+      "Bash(docker compose *)",
+      "Bash(docker buildx *)",
+      "Bash(docker system *)",
+      "Bash(docker info *)",
+      "Bash(curl *)"
     ]
   }
 }

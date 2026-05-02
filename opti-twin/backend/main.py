@@ -40,6 +40,7 @@ from api_contracts.schemas import (
     DRInjectRequest,
     KPISnapshot,
     LivePriceResponse,
+    PricingEventSearchResult,
     PricingModeRequest,
     ProfileRequest,
     RecommendationOutput,
@@ -48,6 +49,7 @@ from api_contracts.schemas import (
     TelemetryInput,
 )
 from pricing.demand_response_controller import DemandResponseController
+from pricing.event_store import PricingEventStore
 from pricing.load_flexibility_scheduler import LoadFlexibilityScheduler
 from pricing.price_signal_broker import PriceSignalBroker
 from pricing.revenue_optimizer import RevenueOptimizer
@@ -75,6 +77,7 @@ class AppState:
     dr_controller: DemandResponseController
     scheduler: LoadFlexibilityScheduler
     revenue: RevenueOptimizer
+    event_store: PricingEventStore
     last_forecast: Optional[dict] = None
 
     def __init__(self) -> None:
@@ -87,6 +90,7 @@ class AppState:
         self.dr_controller = DemandResponseController()
         self.scheduler = LoadFlexibilityScheduler()
         self.revenue = RevenueOptimizer()
+        self.event_store = PricingEventStore()
         self.last_forecast = None
 
 
@@ -120,6 +124,7 @@ async def price_publisher() -> None:
             if state.last_telemetry:
                 sim_hour = state.last_telemetry.get("sim_hour")
             price_data = state.price_broker.get_current_price(sim_hour)
+            state.event_store.record_price_tick(price_data)
             await state.broker.publish("pricing.live", price_data)
             await broadcast({"type": "pricing", "data": price_data})
 
@@ -127,6 +132,7 @@ async def price_publisher() -> None:
             if forecast_counter >= DPE_FORECAST_INTERVAL or state.last_forecast is None:
                 forecast_data = state.price_broker.get_forecast(sim_hour)
                 state.last_forecast = forecast_data
+                state.event_store.record_forecast_update(forecast_data)
                 await state.broker.publish("pricing.forecast", forecast_data)
                 forecast_counter = 0
         except Exception as exc:
@@ -261,7 +267,10 @@ async def pricing_get_mode():
 
 @app.post("/api/v1/pricing/mode")
 async def pricing_set_mode(req: PricingModeRequest):
+    old_mode = state.price_broker.mode
     state.price_broker.set_mode(req.mode)
+    if req.mode != old_mode:
+        state.event_store.record_mode_change(old_mode, req.mode)
     await state.broker.publish("pricing.control", {"action": "set_mode", "mode": req.mode})
     log.info("DPE mode -> %s", req.mode)
     return {"ok": True, "mode": req.mode}
@@ -310,10 +319,10 @@ async def dr_inject(req: DRInjectRequest):
         duration_minutes=req.duration_minutes,
     )
     assessment = state.dr_controller.process_event(ev, machine_state)
+    state.event_store.record_dr_event(ev.to_dict(), assessment)
     if ev.status == "ACCEPTED":
         state.revenue.record_dr_payment(ev.payment_earned_egp)
         state.kpi.ingest_dr_payment(ev.payment_earned_egp)
-        # Forward arc reduction to simulator
         arc_mw = float(machine_state.get("arc_power_mw", 90.0))
         target_mw = max(60.0, arc_mw - ev.accepted_mw)
         await state.broker.publish("sim.control", {
@@ -327,6 +336,30 @@ async def dr_inject(req: DRInjectRequest):
 @app.get("/api/v1/pricing/dr/events")
 async def dr_events():
     return state.dr_controller.snapshot()
+
+
+@app.get("/api/v1/pricing/events/search", response_model=PricingEventSearchResult)
+async def pricing_events_search(
+    q: Optional[str] = None,
+    event_kind: Optional[str] = None,
+    dr_status: Optional[str] = None,
+    dr_type: Optional[str] = None,
+    is_peak: Optional[bool] = None,
+    limit: int = 50,
+):
+    results = state.event_store.search(
+        q=q,
+        event_kind=event_kind,
+        dr_status=dr_status,
+        dr_type=dr_type,
+        is_peak=is_peak,
+        limit=min(limit, 200),
+    )
+    return PricingEventSearchResult(
+        total=len(results),
+        results=results,
+        stats=state.event_store.stats(),
+    )
 
 
 # ---------- WebSocket ----------

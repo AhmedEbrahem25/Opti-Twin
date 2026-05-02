@@ -154,3 +154,9 @@ class RevenueSnapshot(BaseModel):
     capacity_credits_egp: float = 0.0
     ancillary_egp: float = 0.0
     total_revenue_egp: float = 0.0
+
+
+class PricingEventSearchResult(BaseModel):
+    total: int
+    results: list[dict]
+    stats: dict
