@@ -22,7 +22,20 @@
       "Bash(timeout 8 docker logs opti-twin-backend --follow)",
       "Bash(timeout 8 docker logs opti-twin-ai --follow)",
       "Bash(timeout 8 docker logs opti-twin-sim --follow)",
-      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('total:', d['stats']['total']\\); print\\('services:', d['stats']['services']\\); print\\('by_level:', d['stats']['by_level']\\); [print\\(e['ts'][:19], e['level'], e['service'], e['msg'][:60]\\) for e in d['logs'][:5]]\")"
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('total:', d['stats']['total']\\); print\\('services:', d['stats']['services']\\); print\\('by_level:', d['stats']['by_level']\\); [print\\(e['ts'][:19], e['level'], e['service'], e['msg'][:60]\\) for e in d['logs'][:5]]\")",
+      "Bash(Get-ChildItem *)",
+      "Bash(powershell -Command \"Select-String -Path 'F:\\\\Projects\\\\NextCity AI 2026\\\\plan.md' -Pattern '^## 7\\\\.|^## 17\\\\.' -Context 50,100\")",
+      "Bash(powershell -Command \"Select-String -Path 'F:\\\\Projects\\\\NextCity AI 2026\\\\report.md' -Pattern '^## 7\\\\.|^## [0-9]+.*AI|^## [0-9]+.*Reward' -Context 30,80\")",
+      "Bash(powershell -Command \"Select-String -Path 'F:\\\\Projects\\\\NextCity AI 2026\\\\plan.md' -Pattern '^## 17\\\\.' -Context 0,120\")",
+      "Bash(python -c 'from environment import OptiTwinEAFEnv, ACTIONS; print\\('\\\\''actions:'\\\\'', ACTIONS\\); env = OptiTwinEAFEnv\\(\\); obs, info = env.reset\\(seed=42\\); print\\('\\\\''obs shape:'\\\\'', obs.shape\\); *)",
+      "Bash(pip show *)",
+      "Bash(python -m venv .venv)",
+      "Bash(\".venv/Scripts/python.exe\" -m pip install --quiet --upgrade pip)",
+      "Bash(\".venv/Scripts/python.exe\" -m pip install numpy==1.26.4 gymnasium==0.29.1 stable-baselines3==2.3.0 torch==2.2.2 --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple --quiet)",
+      "Bash(docker --version)",
+      "Skill(claude-api)",
+      "PowerShell(Move-Item *)",
+      "Bash(docker exec *)"
     ]
   }
 }

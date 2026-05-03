@@ -4,3 +4,4 @@ stable-baselines3==2.3.0
 torch==2.2.2
 redis==5.0.1
 pydantic==2.6.4
+anthropic==0.39.0

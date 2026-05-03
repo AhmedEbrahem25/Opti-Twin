@@ -26,6 +26,7 @@ except ImportError:  # pragma: no cover
 
 from environment import ACTIONS, _get_forecast_prices, make_obs_vector
 from reward_function import RewardWeights, compute_reward
+from safety import apply_action_mask, clamp_setpoints
 from xai_engine import generate_reason, pick_dominant_component
 
 
@@ -45,6 +46,9 @@ class AIRecommendation:
     production_status: str
     reward_components: Dict[str, float]
     dominant_reason: str
+    safety_overridden: bool = False
+    safety_reason: Optional[str] = None
+    raw_action_label: Optional[str] = None  # what the policy emitted before masking
 
 
 class OptiTwinAgent:
@@ -69,10 +73,16 @@ class OptiTwinAgent:
         if self.model is not None:
             obs = make_obs_vector(state)
             action, _ = self.model.predict(obs, deterministic=True)
-            label = ACTIONS[int(action)]
+            raw_label = ACTIONS[int(action)]
         else:
-            label = self._scripted_policy(state)
-        return self._build_recommendation(label, state)
+            raw_label = self._scripted_policy(state)
+
+        mask = apply_action_mask(raw_label, state)
+        rec = self._build_recommendation(mask.label, state)
+        rec.safety_overridden = mask.overridden
+        rec.safety_reason = mask.reason
+        rec.raw_action_label = raw_label if mask.overridden else None
+        return rec
 
     def update_weights(self, weights: RewardWeights) -> None:
         self.weights = weights
@@ -147,6 +157,8 @@ class OptiTwinAgent:
         elif label == "TRANSFORMER_DERATE":
             arc_mw = min(75.0, arc_p)
         # HOLD_STEADY: leave None
+
+        arc_mw, cool_lmin, comp_mvar = clamp_setpoints(arc_mw, cool_lmin, comp_mvar)
 
         magnitude_pct = 0.0
         if arc_mw is not None:

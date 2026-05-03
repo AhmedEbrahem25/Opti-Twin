@@ -22,6 +22,7 @@ import redis
 import logger as _logger_mod
 from agent import OptiTwinAgent
 from environment import update_forecast_cache
+from llm_xai import LLMXAIWorker, XAIJob, excerpt_state
 from reward_function import RewardWeights
 
 REDIS_HOST  = os.getenv("REDIS_HOST", "redis")
@@ -42,6 +43,9 @@ def make_weights_from_env() -> RewardWeights:
     )
 
 
+SAFETY_ROLLBACK_THRESHOLD = 3  # planing-v2.md §13.3
+
+
 class AIService:
     def __init__(self, r: redis.Redis, agent: OptiTwinAgent) -> None:
         self.r     = r
@@ -50,6 +54,11 @@ class AIService:
         self._lock = threading.Lock()
         self._rec_count  = 0
         self._hold_count = 0
+        self._consecutive_overrides = 0
+        self._rollback_announced = False  # latch so we emit one event per streak
+        self._last_action_label: Optional[str] = None
+        self.llm_xai = LLMXAIWorker(r)
+        self.llm_xai.start()
 
     # ── Control channel ───────────────────────────────────────────────────────
 
@@ -116,6 +125,51 @@ class AIService:
             rec = self.agent.recommend(state)
             self._rec_count += 1
 
+            # Track consecutive safety overrides — emit a rollback event on streaks
+            # past the threshold (planing-v2.md §13.3).
+            if rec.safety_overridden:
+                self._consecutive_overrides += 1
+                if (
+                    self._consecutive_overrides >= SAFETY_ROLLBACK_THRESHOLD
+                    and not self._rollback_announced
+                ):
+                    rollback_payload = {
+                        "timestamp": state.get("timestamp"),
+                        "machine_id": state.get("machine_id"),
+                        "consecutive_overrides": self._consecutive_overrides,
+                        "reason": rec.safety_reason,
+                        "level": "critical",
+                    }
+                    try:
+                        self.r.publish("ai.safety_rollback", json.dumps(rollback_payload))
+                        log.warning(
+                            "Safety rollback announced — %d consecutive overrides (reason=%s)",
+                            self._consecutive_overrides, rec.safety_reason,
+                        )
+                    except Exception as exc:
+                        log.error("Publish ai.safety_rollback failed: %s", exc)
+                    self._rollback_announced = True
+            else:
+                self._consecutive_overrides = 0
+                self._rollback_announced = False
+
+            # Enqueue LLM XAI enrichment ONLY on action transitions, so we don't
+            # call the LLM on every HOLD_STEADY tick. No-op if worker disabled.
+            if rec.action_label != self._last_action_label:
+                self.llm_xai.submit(XAIJob(
+                    timestamp=state.get("timestamp"),
+                    machine_id=state.get("machine_id"),
+                    action_label=rec.action_label,
+                    raw_action_label=rec.raw_action_label,
+                    safety_overridden=rec.safety_overridden,
+                    safety_reason=rec.safety_reason,
+                    dominant_reason=rec.dominant_reason,
+                    machine_health=rec.machine_health,
+                    reward_components=rec.reward_components,
+                    state_excerpt=excerpt_state(state),
+                ))
+                self._last_action_label = rec.action_label
+
             payload = {
                 "timestamp":                     state.get("timestamp"),
                 "machine_id":                    state.get("machine_id"),
@@ -131,6 +185,9 @@ class AIService:
                 "reward_components":             rec.reward_components,
                 "dominant_reason":               rec.dominant_reason,
                 "ai_enabled":                    self.ai_enabled,
+                "safety_overridden":             rec.safety_overridden,
+                "safety_reason":                 rec.safety_reason,
+                "raw_action_label":              rec.raw_action_label,
             }
 
             if rec.action_label != "HOLD_STEADY":

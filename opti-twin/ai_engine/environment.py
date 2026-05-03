@@ -30,6 +30,8 @@ ACTIONS = [
     "RAISE_PF_COMPENSATION",
     "EMERGENCY_COOLING",
     "PRE_PEAK_DROP",
+    "GRID_RIDE_THROUGH",
+    "TRANSFORMER_DERATE",
 ]
 
 OBS_DIM = 32  # extended from 16 with dynamic pricing features
@@ -128,17 +130,33 @@ class OptiTwinEAFEnv:
         self._max_steps = 480  # 1 simulated day at 3 sim-min steps
         self._state: Dict[str, Any] = {}
 
+    # Each env step represents 3 sim-minutes; 480 steps ≈ 24 sim-hours.
+    SIM_MIN_PER_STEP = 3.0
+
+    # TOU peak window (matches docker-compose TOU_PEAK_START_HOUR/TOU_PEAK_END_HOUR)
+    _TOU_PEAK_START_HOUR = 18.0
+    _TOU_PEAK_END_HOUR = 22.0
+    _TOU_PEAK_RATE_EGP = 2.50
+    _TOU_OFFPEAK_RATE_EGP = 1.20
+
     def reset(self, *, seed: Optional[int] = None, options: Optional[Dict] = None
               ) -> Tuple[np.ndarray, Dict]:
-        rng = np.random.default_rng(seed)
+        self._rng = np.random.default_rng(seed)
         self._step = 0
+        # Seed initial sim_hour anywhere in the 24-hour cycle so each episode
+        # samples both peak and off-peak periods.
+        sim_hour = float(self._rng.uniform(0.0, 24.0))
+        # Carry an internal counter so a low-frequency event lasts multiple ticks.
+        self._grid_spike_ticks_remaining = 0
         self._state = {
-            "electricity_price": 1.60,
-            "is_peak": False,
-            "grid_frequency": 50.0 + float(rng.normal(0, 0.05)),
-            "furnace_bath_temp": 1300.0 + float(rng.uniform(-50, 50)),
-            "electrode_temp": 2000.0 + float(rng.uniform(-200, 200)),
-            "wall_panel_temp": 120.0 + float(rng.uniform(-20, 20)),
+            "electricity_price": self._tou_price(sim_hour),
+            "is_peak": self._is_peak_hour(sim_hour),
+            "sim_hour": sim_hour,
+            "tou_mode": True,
+            "grid_frequency": 50.0 + float(self._rng.normal(0, 0.05)),
+            "furnace_bath_temp": 1300.0 + float(self._rng.uniform(-50, 50)),
+            "electrode_temp": 2000.0 + float(self._rng.uniform(-200, 200)),
+            "wall_panel_temp": 120.0 + float(self._rng.uniform(-20, 20)),
             "cooling_water_outlet_temp": 35.0,
             "heat_progress_pct": 0.0,
             "current_batch_weight": 180.0,
@@ -150,11 +168,22 @@ class OptiTwinEAFEnv:
             "electrode_position_mm": 250.0,
             "electrode_consumption_kg": 0.05,
             "pf_penalty_egp_per_hour_est": 0.0,
+            "crisis_flags": {"wall_overheat": False, "grid_spike": False, "transformer_alarm": False},
         }
         return make_obs_vector(self._state), {}
 
+    @classmethod
+    def _is_peak_hour(cls, sim_hour: float) -> bool:
+        h = sim_hour % 24.0
+        return cls._TOU_PEAK_START_HOUR <= h < cls._TOU_PEAK_END_HOUR
+
+    @classmethod
+    def _tou_price(cls, sim_hour: float) -> float:
+        return cls._TOU_PEAK_RATE_EGP if cls._is_peak_hour(sim_hour) else cls._TOU_OFFPEAK_RATE_EGP
+
     def step(self, action: int) -> Tuple[np.ndarray, float, bool, bool, Dict]:
         s = self._state
+        rng = self._rng
         label = ACTIONS[action]
 
         # Action effects
@@ -164,12 +193,42 @@ class OptiTwinEAFEnv:
             s["power_factor"] = min(0.94, s["power_factor"] + 0.03)
         elif label == "EMERGENCY_COOLING":
             s["wall_panel_temp"] = max(80.0, s["wall_panel_temp"] - 15.0)
+            s["arc_power_mw"] = max(60.0, s["arc_power_mw"] - 10.0)
         elif label == "PRE_PEAK_DROP":
             s["arc_power_mw"] = max(60.0, s["arc_power_mw"] - 20.0)
+        elif label == "GRID_RIDE_THROUGH":
+            s["arc_power_mw"] = 60.0
+        elif label == "TRANSFORMER_DERATE":
+            s["arc_power_mw"] = min(75.0, s["arc_power_mw"])
         # HOLD_STEADY: no change
 
-        # Stochastic environment dynamics
-        rng = np.random.default_rng()
+        # Advance sim clock + TOU pricing schedule
+        s["sim_hour"] = (s["sim_hour"] + self.SIM_MIN_PER_STEP / 60.0) % 24.0
+        s["is_peak"] = self._is_peak_hour(s["sim_hour"])
+        s["electricity_price"] = self._tou_price(s["sim_hour"])
+
+        # Stochastic crisis injection — gives PPO the chance to learn the rare actions.
+        # Probabilities are per-step (3 sim-minutes); roughly one event per few hours.
+        flags = s["crisis_flags"]
+        flags["wall_overheat"] = False
+        flags["transformer_alarm"] = False
+
+        if rng.random() < 0.005:
+            s["wall_panel_temp"] = float(s["wall_panel_temp"] + 50.0)
+            flags["wall_overheat"] = True
+        if rng.random() < 0.003:
+            self._grid_spike_ticks_remaining = 5
+        if self._grid_spike_ticks_remaining > 0:
+            s["grid_frequency"] = 49.5 + float(rng.uniform(-0.1, 0.1))
+            flags["grid_spike"] = True
+            self._grid_spike_ticks_remaining -= 1
+        else:
+            s["grid_frequency"] = 50.0 + float(rng.normal(0, 0.05))
+            flags["grid_spike"] = False
+        if rng.random() < 0.002:
+            flags["transformer_alarm"] = True
+
+        # Baseline thermal & production dynamics
         s["wall_panel_temp"] = float(s["wall_panel_temp"] + rng.uniform(-1, 3))
         s["furnace_bath_temp"] = float(
             min(1700.0, s["furnace_bath_temp"] + s["arc_power_mw"] * 0.3 + rng.uniform(-2, 2))
@@ -177,17 +236,31 @@ class OptiTwinEAFEnv:
         s["heat_progress_pct"] = min(100.0, s["heat_progress_pct"] + 1.0)
         s["energy_this_heat_kwh"] += s["arc_power_mw"] * 1000.0 / 60.0
 
-        # PF penalty estimate
+        # PF penalty estimate (uses current TOU price, not hardcoded 1.60)
         if s["arc_power_mw"] * 1000.0 > 500.0 and s["power_factor"] < 0.92:
             deficit = 0.92 - s["power_factor"]
-            s["pf_penalty_egp_per_hour_est"] = deficit * s["arc_power_mw"] * 1000.0 * 1.60 * 0.05
+            s["pf_penalty_egp_per_hour_est"] = deficit * s["arc_power_mw"] * 1000.0 * s["electricity_price"] * 0.05
         else:
             s["pf_penalty_egp_per_hour_est"] = 0.0
 
         rc = compute_reward(s, self.weights, baseline_arc_power_mw=100.0)
 
+        # Training-time-only crisis-violation penalties.
+        # The user-facing reward in agent.py omits these (KPI display only).
+        # Without them, PPO has no gradient to keep GRID_RIDE_THROUGH /
+        # TRANSFORMER_DERATE alive after BC warm-start drifts under entropy.
+        crisis_penalty = 0.0
+        if flags["grid_spike"] and s["arc_power_mw"] > 65.0:
+            crisis_penalty -= 50.0
+        if flags["transformer_alarm"] and s["arc_power_mw"] > 80.0:
+            crisis_penalty -= 50.0
+        if flags["wall_overheat"] and s["arc_power_mw"] > 80.0:
+            crisis_penalty -= 30.0
+
+        total = rc.total + crisis_penalty
+
         self._step += 1
         terminated = s["heat_progress_pct"] >= 100.0
         truncated = self._step >= self._max_steps
 
-        return make_obs_vector(s), rc.total, terminated, truncated, {"reward_components": rc.as_dict()}
+        return make_obs_vector(s), total, terminated, truncated, {"reward_components": rc.as_dict()}

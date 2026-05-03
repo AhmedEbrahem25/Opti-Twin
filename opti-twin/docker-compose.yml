@@ -25,6 +25,10 @@ services:
       - RL_ZETA=${RL_ZETA:-0.8}
       - MACHINE_TYPE=EAF
       - MODEL_PATH=/app/models/opti_twin_ppo.zip
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - LLM_XAI_MODEL=${LLM_XAI_MODEL:-claude-haiku-4-5-20251001}
+    volumes:
+      - ./ai_engine/models:/app/models
     depends_on:
       redis:
         condition: service_healthy

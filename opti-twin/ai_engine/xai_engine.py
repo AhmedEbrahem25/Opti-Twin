@@ -41,7 +41,7 @@ TEMPLATES = {
         "en": "Phase {phase}, bath {bath:.0f}°C, PF {pf:.2f}, no constraint violation. Holding current setpoints; predicted reward stable.",
         "ar": "المرحلة {phase}، الحوض {bath:.0f}°م، PF {pf:.2f}، لا يوجد انتهاك. الحفاظ على نقاط الضبط الحالية.",
     },
-    ("PRE_PEAK_DROP", "energy_savings_egp"): {
+    ("PRE_PEAK_DROP", "tou_window"): {
         "en": "Forecast TOU peak in <30 min. Pre-emptively dropping arc power to avoid peak billing. Heat at {progress:.0f}% — safe to slow.",
         "ar": "ذروة TOU متوقعة خلال أقل من 30 دقيقة. خفض القدرة وقائياً لتجنب فاتورة الذروة. الانصهار عند {progress:.0f}% - آمن للتباطؤ.",
     },

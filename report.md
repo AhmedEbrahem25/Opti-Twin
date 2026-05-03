@@ -201,13 +201,20 @@ opti-twin/
 │       └── transformer_alarm.py   Transformer MVA cap crisis trigger
 │
 ├── ai_engine/                     ─── TIER 3: AI CORE ───
-│   ├── environment.py             OptiTwinEAFEnv Gymnasium env (138 lines)
-│   ├── agent.py                   OptiTwinAgent PPO + scripted (200 lines)
-│   ├── reward_function.py         Multi-objective reward (103 lines)
-│   ├── xai_engine.py              Template-based EN+AR explainer (100 lines)
-│   ├── requirements.txt           gymnasium, stable-baselines3, torch
+│   ├── environment.py             OptiTwinEAFEnv Gymnasium env, 7 actions, crisis injection, TOU schedule
+│   ├── agent.py                   OptiTwinAgent PPO + scripted, mask-aware
+│   ├── reward_function.py         Multi-objective reward (6 components)
+│   ├── safety.py                  Hard-limit action mask + setpoint clamps (planing-v2 §13)
+│   ├── xai_engine.py              Template-based EN+AR explainer (sync, fallback)
+│   ├── llm_xai.py                 Async LLM-grounded XAI worker (Anthropic Haiku, prompt-cached)
+│   ├── train_ppo.py               BC warm-start + PPO fine-tune training script
+│   ├── eval_agent.py              PPO-vs-scripted scoreboard (mean reward, action dist, crisis-handling rate)
+│   ├── tests/
+│   │   └── test_safety.py         Unit tests for mask + clamps (11 cases)
+│   ├── requirements.txt           gymnasium, stable-baselines3, torch, anthropic
 │   └── models/
-│       └── opti_twin_ppo.zip      Pre-trained PPO model (frozen for demo)
+│       ├── README.md              Model state, retrain procedure
+│       └── opti_twin_ppo.zip      PPO checkpoint (parked for demo — see §7)
 │
 ├── backend/                       ─── TIER 4: API ───
 │   ├── main.py                    FastAPI routes + WebSocket + 8 DPE endpoints
@@ -402,7 +409,7 @@ Four preset profiles adjust these weights for different operator priorities:
 ---
 
 ### `ai_engine/agent.py`
-**Dual-mode decision engine.** On startup, attempts to load the pre-trained PPO model from `models/opti_twin_ppo.zip`. If it loads successfully, uses neural network inference. If loading fails, falls back to the **scripted policy** (deterministic, auditable, fast):
+**Dual-mode decision engine with safety mask.** On startup, attempts to load the PPO model from `models/opti_twin_ppo.zip`. If absent or load fails, falls back to the **scripted policy** (deterministic, auditable, fast). Whichever underlying policy fires, the chosen action passes through `safety.apply_action_mask` before reaching the recommendation, and the final continuous setpoints pass through `safety.clamp_setpoints`.
 
 **Scripted Policy Priority Tree:**
 ```
@@ -415,14 +422,28 @@ Priority 6: TOU + pre-peak window 17–18h  → PRE_PEAK_DROP (anticipatory)
 Priority 7: Default                       → HOLD_STEADY
 ```
 
-Outputs an `AIRecommendation` dataclass: action label, magnitude %, savings estimate (EGP/hr), health status enum, production status enum, and reward component breakdown.
+Outputs an `AIRecommendation` dataclass: action label, magnitude %, savings estimate (EGP/hr), health/production status, reward components, plus three new fields populated by the mask: `safety_overridden: bool`, `safety_reason: str | None` (e.g. `wall_over_limit`, `bath_freeze_risk`), and `raw_action_label: str | None` (what the policy emitted before the mask, when overridden).
+
+---
+
+### `ai_engine/safety.py`
+**Hard-limit action mask + setpoint clamps.** Sits between the policy and the recommendation publish path. Implements the 4 envelopes from `planing-v2.md` §13.1:
+
+| Trigger | Forced action | Reason code |
+|---|---|---|
+| `wall_panel_temp ≥ 250°C` | `EMERGENCY_COOLING` | `wall_over_limit` |
+| `grid_frequency < 49.7 Hz` | `GRID_RIDE_THROUGH` | `grid_freq_low` |
+| `crisis_flags.transformer_alarm` | `TRANSFORMER_DERATE` | `transformer_alarm` |
+| `furnace_bath_temp < 1500°C` AND action ∈ {REDUCE_ARC_POWER, PRE_PEAK_DROP} | `HOLD_STEADY` | `bath_freeze_risk` |
+
+`clamp_setpoints` enforces `arc_power_mw ∈ [60, 110]`, `cooling_lmin ∈ [100, 400]`, `reactive_comp_mvar ∈ [0, 30]` — same magnitudes as the simulator-side clamps in `eaf_machine.py`, applied earlier so the operator-visible recommendation matches what executes. **Auto-rollback:** `agent_service` counts consecutive overrides; on 3+ in a row publishes one event to the new `ai.safety_rollback` Redis channel. Tested in `tests/test_safety.py` (11/11 pass).
 
 ---
 
 ### `ai_engine/xai_engine.py`
-**Template-based Explainable AI engine.** NOT a large language model — uses deterministic string templates matched to (action × dominant_reward_component) pairs. Ensures every explanation is auditable, reproducible, and never hallucinates.
+**Template-based Explainable AI engine — synchronous default.** NOT a large language model — uses deterministic string templates matched to (action × dominant_reward_component) pairs. Ensures every explanation is auditable, reproducible, and never hallucinates. Always runs on every tick; result published immediately on `ai.recommendation`.
 
-Supports 8 action-reason combinations, each with English and Arabic templates. Language selection is biased based on the dominant reward component detected. Example output:
+Supports ~10 action-reason combinations, each with English and Arabic templates. Example:
 
 ```
 EN: "Peak pricing (2.5 EGP/kWh) is active. Bath temperature 1,590°C is safe.
@@ -434,8 +455,38 @@ AR: "تسعير الذروة نشط (2.5 ج.م/كيلوواط ساعة). درج�
 
 ---
 
-### `ai_engine/models/opti_twin_ppo.zip`
-Pre-trained PPO checkpoint committed for demo use. Trained offline on the custom `OptiTwinEAFEnv`. Ships frozen — no training happens during demo runtime. The scripted policy serves as a fully functional fallback that produces identical-quality decisions for demo purposes.
+### `ai_engine/llm_xai.py`
+**Async LLM-grounded XAI worker — non-blocking enrichment path.** Replaces the static template engine for action-transition events with prose generated by Claude Haiku 4.5, while keeping the synchronous template path as a zero-regression fallback. Off the 3-second tick budget.
+
+- **Trigger:** action *transitions* only (not every HOLD_STEADY tick). Bounded queue (32) drained by a daemon worker thread.
+- **Output channel:** `ai.xai_refresh`, keyed by `(timestamp, machine_id)` so the dashboard can patch the row in place after `ai.recommendation` already rendered.
+- **Structured response:** Anthropic SDK `tool_use` with one tool (`emit_explanation`) that takes `reason_en` + `reason_ar` — guaranteed bilingual output, no parsing fragility.
+- **Prompt caching:** stable system prompt block (~1.5K tokens) marked `cache_control: ephemeral`, so subsequent calls hit cache (~0.1× cost, ~300ms latency).
+- **In-process LRU cache** keyed by `(action_label, dominant_reason, severity_bucket)` with 1h TTL; avoids re-explaining identical situations.
+- **Fallback:** if `ANTHROPIC_API_KEY` unset (current demo state) the worker logs `LLM XAI disabled` once at startup and disables itself; per-call API failures log and emit no refresh — the template reason already on `ai.recommendation` stays. Demo never breaks.
+
+---
+
+### `ai_engine/train_ppo.py`
+**Behaviour-cloning warm-start + PPO fine-tune training pipeline.**
+
+1. Roll out the scripted policy over the env to collect ~50K (obs, action) pairs.
+2. Train an MLP classifier (matching SB3's default MlpPolicy `[64, 64]` net_arch) for ~10 epochs on the BC dataset (~2 min CPU; achieves 95.6% accuracy on the scripted policy).
+3. Initialise PPO and copy the BC weights into `policy.mlp_extractor` + `policy.action_net`.
+4. Fine-tune with `total_timesteps=200_000`, `lr=3e-4`, `ent_coef=0.01`, `n_steps=2048`, `seed=42`. Save to `models/opti_twin_ppo.zip`.
+
+Implements M4 (Behaviour Cloning Warm Start) from `planing-v2.md` §8.
+
+---
+
+### `ai_engine/eval_agent.py`
+**Scripted-vs-PPO scoreboard.** Runs N seeded episodes under both policies; prints mean total reward, action distribution, and crisis-handling rate (% of `wall_overheat` ticks where the policy emits `EMERGENCY_COOLING`, similar for `grid_spike` × `GRID_RIDE_THROUGH`). Acts as a demo-day gate: if `PPO < scripted` mean reward, the operator parks the trained checkpoint and lets the agent's automatic fallback engage (see `models/README.md`).
+
+---
+
+### `ai_engine/models/`
+- **`opti_twin_ppo.zip`** — when present, loaded at container startup. **Currently parked** as `opti_twin_ppo.zip.untrained_demo`: the 200K-step run from 2026-05-03 underperformed the scripted policy on the eval set (mean reward 285 vs 843) due to a missing production-rate signal in `compute_reward`, which let PPO over-prefer `TRANSFORMER_DERATE`. With no `opti_twin_ppo.zip` present, the agent runs the scripted decision tree — same behaviour as every prior demo iteration, but now with the safety mask and LLM XAI layered on top.
+- **`README.md`** — documents the parked state, the env-reward bug, and the procedure to re-train and re-enable PPO post-hackathon.
 
 ---
 
@@ -772,6 +823,40 @@ quality_focused     1.0   0.9   1.8   2.0   0.5   0.8
 │
 └─ Default ──────────────────────────────► HOLD_STEADY
 ```
+
+### Safety / Action-Mask Layer
+
+The mask sits between the policy (PPO or scripted) and the recommendation publish path. It is **non-negotiable** — its rules fire regardless of what the policy chose, in priority order:
+
+```
+1. wall_panel_temp ≥ 250°C            ──► force EMERGENCY_COOLING
+2. grid_frequency  < 49.7 Hz          ──► force GRID_RIDE_THROUGH
+3. crisis_flags.transformer_alarm     ──► force TRANSFORMER_DERATE
+4. furnace_bath_temp < 1500°C
+   AND label ∈ {REDUCE_ARC_POWER,
+                PRE_PEAK_DROP}        ──► force HOLD_STEADY (bath-freeze guard)
+```
+
+When the mask fires, the recommendation carries `safety_overridden: true`, a machine-readable `safety_reason` (e.g. `wall_over_limit`), and the `raw_action_label` the policy originally emitted, so the dashboard can render *both* the policy's intent and the protective override. Continuous setpoints (`arc_power_mw`, `cooling_lmin`, `reactive_comp_mvar`) also pass through `clamp_setpoints` so what the operator sees matches what the simulator will execute.
+
+**Auto-rollback (planing-v2 §13.3):** the service tracks consecutive overrides; once it crosses 3, one event is published to a new `ai.safety_rollback` Redis channel (level=critical, reason, count). Latched — only one event per streak.
+
+### LLM-Grounded XAI Layer
+
+Static templates cover ~10 (action × dominant_reason) pairs. For everything else — and for the cases where the operator wants prose that *names the actual telemetry values* and explains *why the mask overrode the policy* — there is a second, asynchronous explanation path.
+
+| | Synchronous (template) | Asynchronous (LLM) |
+|---|---|---|
+| Channel | `ai.recommendation` | `ai.xai_refresh` |
+| When | Every tick | Action *transitions* only |
+| Latency | <1 ms | ~300 ms (cache hit) – ~1 s (miss) |
+| Off the 3-sec budget? | n/a (synchronous) | yes — bounded queue (32), daemon worker |
+| Model | Deterministic strings | `claude-haiku-4-5-20251001` |
+| Output shape | EN + AR strings | `tool_use("emit_explanation", {reason_en, reason_ar})` |
+| Caching | n/a | Anthropic prompt cache (system prompt) + LRU on `(action, dominant_reason, severity)` |
+| If unavailable | n/a | Worker logs once, disables; templates remain authoritative |
+
+The LLM path is opt-in: set `ANTHROPIC_API_KEY` in the environment and the worker enables itself. Without the key the system runs as before, with templates only — zero regression.
 
 ---
 
@@ -1164,11 +1249,11 @@ transformer_alarm  MVA cap → 75 MW           TRANSFORMER_DERATE      Manual: c
 **Current gap:** Today crises are manually injected. This module makes the system self-aware of emerging faults.
 
 ### M4 — Behavior Cloning Warm Start
-**Status:** Planned  
-**Tech:** Imitation learning from scripted policy demonstrations  
-**What it does:** Generates 50,000 scripted-policy episodes and uses behavioral cloning to warm-start the PPO model. Reduces cold-start training from >100k steps to <5k steps.
+**Status:** Implemented ✓ (`ai_engine/train_ppo.py`)
+**Tech:** Imitation learning from scripted-policy demonstrations
+**What it does:** Rolls out the scripted policy for 50K transitions, trains an MLP classifier on `(obs → action_id)` pairs (~2 min CPU, 95.6% acc on the 2026-05-03 run), then injects the BC weights into PPO's `MlpPolicy` before fine-tuning. Reduces cold-start training time and gives PPO a sane initial action distribution.
 
-**Current gap:** Pre-trained PPO model ships frozen from offline training. Warm start enables faster retraining on new environments.
+**Remaining gap:** the env reward function lacks a production-rate signal, so the 200K-step run from 2026-05-03 underperformed the scripted policy on the eval set. The trained checkpoint is parked at `models/opti_twin_ppo.zip.untrained_demo`; the agent's automatic fallback runs the scripted policy. Re-train procedure documented in `models/README.md`.
 
 ### M5 — Preference Learning (RLHF)
 **Status:** Planned  
