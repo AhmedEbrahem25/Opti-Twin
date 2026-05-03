@@ -17,7 +17,7 @@ from typing import List, Optional
 
 from pricing.synthetic_spot_generator import SyntheticSpotGenerator
 
-log = logging.getLogger("pricing.broker")
+log = logging.getLogger("opti-twin.pricing.broker")
 
 FLAT_RATE = float(os.getenv("TARIFF_RATE_EGP_PER_KWH", "1.60"))
 DPE_MODE = os.getenv("DPE_MODE", "flat")

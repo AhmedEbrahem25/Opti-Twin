@@ -5,11 +5,11 @@ Subscribes to the `factory.telemetry` Redis channel, computes a recommendation
 for each frame, publishes:
   - `ai.recommendation`   — for the backend to broadcast over WS
   - `sim.control`         — for the simulator to apply (when AI toggle is ON)
+  - `opti-twin.logs`      — structured log stream for backend aggregation
 """
 
 from __future__ import annotations
 
-import dataclasses
 import json
 import os
 import sys
@@ -19,14 +19,16 @@ from typing import Any, Dict, Optional
 
 import redis
 
+import logger as _logger_mod
 from agent import OptiTwinAgent
 from environment import update_forecast_cache
 from reward_function import RewardWeights
 
+REDIS_HOST  = os.getenv("REDIS_HOST", "redis")
+REDIS_PORT  = int(os.getenv("REDIS_PORT", "6379"))
+MODEL_PATH  = os.getenv("MODEL_PATH", "/app/models/opti_twin_ppo.zip")
 
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
-MODEL_PATH = os.getenv("MODEL_PATH", "/app/models/opti_twin_ppo.zip")
+log: Any = None  # set after Redis connect in main()
 
 
 def make_weights_from_env() -> RewardWeights:
@@ -42,19 +44,21 @@ def make_weights_from_env() -> RewardWeights:
 
 class AIService:
     def __init__(self, r: redis.Redis, agent: OptiTwinAgent) -> None:
-        self.r = r
+        self.r     = r
         self.agent = agent
-        self.ai_enabled = False  # toggled by /api/v1/ai/toggle
+        self.ai_enabled = False
         self._lock = threading.Lock()
+        self._rec_count  = 0
+        self._hold_count = 0
 
-    # ---- Profile / weights / toggle handling ----
+    # ── Control channel ───────────────────────────────────────────────────────
+
     def handle_control(self, data: Dict[str, Any]) -> None:
         with self._lock:
             action = data.get("action")
             if action == "ai_toggle":
                 self.ai_enabled = bool(data.get("enabled"))
-                print(f"[ai] enabled={self.ai_enabled}", flush=True)
-                # Forward to simulator so it knows to clear AI override on OFF
+                log.info("AI toggled → enabled=%s", self.ai_enabled)
                 self.r.publish("sim.control", json.dumps({
                     "action": "ai_toggle",
                     "enabled": self.ai_enabled,
@@ -62,14 +66,15 @@ class AIService:
             elif action == "set_profile":
                 profile = data.get("profile", "default")
                 self.agent.update_weights(RewardWeights.preset(profile))
-                print(f"[ai] reward profile -> {profile}", flush=True)
+                log.info("Reward profile → %s", profile)
             elif action == "tou_mode":
-                # Just forward to simulator
                 self.r.publish("sim.control", json.dumps(data))
+                log.debug("TOU mode forwarded to simulator: %s", data.get("enabled"))
 
     def control_listener(self) -> None:
         pubsub = self.r.pubsub()
         pubsub.subscribe("ai.control")
+        log.info("Subscribed to ai.control")
         for msg in pubsub.listen():
             if msg.get("type") != "message":
                 continue
@@ -80,99 +85,131 @@ class AIService:
             self.handle_control(data)
 
     def pricing_listener(self) -> None:
-        """Subscribe to pricing.forecast and update the observation cache."""
         pubsub = self.r.pubsub()
         pubsub.subscribe("pricing.forecast")
-        print("[ai] subscribed to pricing.forecast", flush=True)
+        log.info("Subscribed to pricing.forecast")
         for msg in pubsub.listen():
             if msg.get("type") != "message":
                 continue
             try:
                 data = json.loads(msg["data"])
                 update_forecast_cache(data)
-            except Exception:
-                pass
+                log.debug("Forecast cache updated — steps=%d", len(data.get("forecast", [])))
+            except Exception as exc:
+                log.warning("pricing_listener error: %s", exc)
 
-    # ---- Telemetry → recommendation ----
+    # ── Telemetry → recommendation ─────────────────────────────────────────────
+
     def telemetry_loop(self) -> None:
         pubsub = self.r.pubsub()
         pubsub.subscribe("factory.telemetry")
-        print("[ai] subscribed to factory.telemetry", flush=True)
+        log.info("Subscribed to factory.telemetry — waiting for frames")
         for msg in pubsub.listen():
             if msg.get("type") != "message":
                 continue
             try:
                 state = json.loads(msg["data"])
             except Exception as exc:
-                print(f"[ai] bad telemetry: {exc}", flush=True)
+                log.error("Bad telemetry frame: %s", exc)
                 continue
 
             rec = self.agent.recommend(state)
+            self._rec_count += 1
+
             payload = {
-                "timestamp": state.get("timestamp"),
-                "machine_id": state.get("machine_id"),
-                "action_label": rec.action_label,
-                "action_magnitude_pct": rec.action_magnitude_pct,
+                "timestamp":                     state.get("timestamp"),
+                "machine_id":                    state.get("machine_id"),
+                "action_label":                  rec.action_label,
+                "action_magnitude_pct":          rec.action_magnitude_pct,
                 "estimated_savings_egp_per_hour": rec.estimated_savings_egp_per_hour,
-                "pf_penalty_avoided_egp": rec.pf_penalty_avoided_egp,
-                "co2_saved_kg": rec.co2_saved_kg,
-                "xai_reason": rec.xai_reason_en,
-                "xai_reason_ar": rec.xai_reason_ar,
-                "machine_health": rec.machine_health,
-                "production_status": rec.production_status,
-                "reward_components": rec.reward_components,
-                "dominant_reason": rec.dominant_reason,
-                "ai_enabled": self.ai_enabled,
+                "pf_penalty_avoided_egp":        rec.pf_penalty_avoided_egp,
+                "co2_saved_kg":                  rec.co2_saved_kg,
+                "xai_reason":                    rec.xai_reason_en,
+                "xai_reason_ar":                 rec.xai_reason_ar,
+                "machine_health":                rec.machine_health,
+                "production_status":             rec.production_status,
+                "reward_components":             rec.reward_components,
+                "dominant_reason":               rec.dominant_reason,
+                "ai_enabled":                    self.ai_enabled,
             }
 
-            # Always broadcast recommendation (so dashboard can show it greyed-out
-            # when AI is off — useful for "compare" view).
+            if rec.action_label != "HOLD_STEADY":
+                log.info(
+                    "Recommendation: %s  magnitude=%+.0f%%  savings=%.0f EGP/hr  health=%s",
+                    rec.action_label, rec.action_magnitude_pct,
+                    rec.estimated_savings_egp_per_hour, rec.machine_health,
+                )
+            else:
+                self._hold_count += 1
+                if self._hold_count % 20 == 0:
+                    log.debug(
+                        "HOLD_STEADY streak=%d  total_recs=%d  health=%s",
+                        self._hold_count, self._rec_count, rec.machine_health,
+                    )
+
             try:
                 self.r.publish("ai.recommendation", json.dumps(payload))
             except Exception as exc:
-                print(f"[ai] publish recommendation failed: {exc}", flush=True)
+                log.error("Publish ai.recommendation failed: %s", exc)
 
-            # Apply to simulator only when AI is enabled
             if self.ai_enabled and rec.action_label != "HOLD_STEADY":
                 ctrl = {
                     "action": "ai_recommendation",
                     "recommendation": {
-                        "arc_power_mw": rec.arc_power_mw,
-                        "cooling_lmin": rec.cooling_lmin,
+                        "arc_power_mw":      rec.arc_power_mw,
+                        "cooling_lmin":      rec.cooling_lmin,
                         "reactive_comp_mvar": rec.reactive_comp_mvar,
                     },
                 }
                 try:
                     self.r.publish("sim.control", json.dumps(ctrl))
                 except Exception as exc:
-                    print(f"[ai] publish sim.control failed: {exc}", flush=True)
+                    log.error("Publish sim.control failed: %s", exc)
 
 
 def main() -> None:
-    print("[ai] Opti-Twin AI engine starting...", flush=True)
-    weights = make_weights_from_env()
-    agent = OptiTwinAgent(weights=weights, model_path=MODEL_PATH)
+    global log
 
+    # Bootstrap a temporary console-only logger before Redis is available
+    import logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s INFO     \033[36m[ai-engine]\033[0m  %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    pre_log = logging.getLogger("ai.startup")
+    pre_log.info("Opti-Twin AI engine starting...")
+
+    weights = make_weights_from_env()
+    agent   = OptiTwinAgent(weights=weights, model_path=MODEL_PATH)
+
+    # Wait for Redis
+    r: redis.Redis | None = None
     for attempt in range(20):
         try:
             r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
             r.ping()
-            print(f"[ai] connected to Redis at {REDIS_HOST}:{REDIS_PORT}", flush=True)
+            pre_log.info("Connected to Redis at %s:%s", REDIS_HOST, REDIS_PORT)
             break
         except Exception as exc:
-            print(f"[ai] redis not ready ({exc}), retry {attempt+1}/20", flush=True)
+            pre_log.warning("Redis not ready (%s) — retry %d/20", exc, attempt + 1)
             time.sleep(2)
     else:
-        print("[ai] FATAL: cannot reach Redis", flush=True)
+        pre_log.critical("FATAL: cannot reach Redis after 20 retries")
         sys.exit(1)
+
+    # Switch to full structured logger (with Redis publisher)
+    log = _logger_mod.setup_logging(redis_client=r)
+    log.info(
+        "AI engine ready — model=%s  profile=default  LOG_LEVEL=%s",
+        MODEL_PATH, os.getenv("LOG_LEVEL", "INFO"),
+    )
 
     svc = AIService(r, agent)
 
-    # Spawn control + pricing listeners
-    threading.Thread(target=svc.control_listener, daemon=True).start()
-    threading.Thread(target=svc.pricing_listener, daemon=True).start()
+    threading.Thread(target=svc.control_listener,  daemon=True).start()
+    threading.Thread(target=svc.pricing_listener,  daemon=True).start()
 
-    # Telemetry consumer (main thread)
     svc.telemetry_loop()
 
 
@@ -180,4 +217,5 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("[ai] stopped by user", flush=True)
+        if log:
+            log.info("AI engine stopped by user")

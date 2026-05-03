@@ -77,10 +77,9 @@ function EventRow({ ev }: { ev: PricingEvent }) {
   const color = kindColor(ev.event_kind, ev.dr_status);
   const icon = kindIcon(ev.event_kind, ev.dr_status);
 
-  // Extract just the English part of the bilingual label
+  // Labels from backend are "Arabic | English" — extract English part
   const labelParts = ev.label.split(" | ");
   const labelEn = labelParts[labelParts.length - 1] ?? ev.label;
-  const labelAr = labelParts[0] !== labelParts[labelParts.length - 1] ? labelParts[0] : null;
 
   return (
     <div
@@ -92,9 +91,6 @@ function EventRow({ ev }: { ev: PricingEvent }) {
         <span className="shrink-0">{icon}</span>
         <div className="flex-1 min-w-0">
           <span className={`${color} font-medium`}>{labelEn}</span>
-          {labelAr && (
-            <span className="text-steel-100/40 ml-2 text-[11px]" dir="rtl">{labelAr}</span>
-          )}
           {ev.event_kind === "dr_event" && ev.dr_payment_egp !== undefined && ev.dr_payment_egp > 0 && (
             <span className="ml-2 text-emerald-400">+{ev.dr_payment_egp.toFixed(0)} EGP</span>
           )}
@@ -179,7 +175,7 @@ export default function PricingEventLog() {
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold text-white uppercase tracking-wide">
-            Pricing Event Log
+            Pricing Events
           </h2>
           {stats && (
             <span className="text-xs text-steel-100/40">({stats.total_events} events)</span>

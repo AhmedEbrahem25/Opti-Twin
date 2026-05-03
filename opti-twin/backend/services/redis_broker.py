@@ -7,10 +7,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from typing import AsyncIterator, Optional
 
 import redis.asyncio as aioredis
+
+log = logging.getLogger("opti-twin.redis")
 
 
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
@@ -26,10 +29,12 @@ class RedisBroker:
             host=REDIS_HOST, port=REDIS_PORT, decode_responses=True
         )
         await self.client.ping()
+        log.info("Redis connected — %s:%s", REDIS_HOST, REDIS_PORT)
 
     async def disconnect(self) -> None:
         if self.client:
             await self.client.close()
+            log.info("Redis connection closed")
 
     async def publish(self, channel: str, payload: dict) -> None:
         if not self.client:

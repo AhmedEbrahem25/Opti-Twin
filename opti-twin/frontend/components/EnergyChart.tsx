@@ -16,10 +16,10 @@ export default function EnergyChart({ data, peakActive }: { data: Point[]; peakA
     <div className="glass rounded-xl p-3 h-72">
       <div className="flex items-baseline justify-between">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-steel-100/80">
-          Arc Power (MW) · 6-min rolling
+          Arc Power — MW
         </h3>
         <span className="text-xs text-steel-100/50">
-          {peakActive ? "🔴 TOU peak active" : "Flat tariff"}
+          {peakActive ? "🔴 Peak tariff active" : "Off-peak · flat rate"}
         </span>
       </div>
       <ResponsiveContainer width="100%" height="88%">

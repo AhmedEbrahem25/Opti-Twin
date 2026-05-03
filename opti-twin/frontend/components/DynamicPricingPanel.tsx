@@ -120,7 +120,7 @@ export default function DynamicPricingPanel({ livePrice }: Props) {
     <div className="glass rounded-xl p-4 mt-4">
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-sm font-semibold text-white uppercase tracking-wide">
-          Dynamic Pricing Engine
+          Live Pricing
         </h2>
         <span className={`text-xs px-2 py-0.5 rounded-full ${isDynamic ? "bg-blue-500/20 text-blue-300 border border-blue-500/40" : "bg-steel-700 text-steel-400"}`}>
           {mode === "flat" ? "Flat tariff" : mode === "sim_spot" ? "Spot market" : "TOU"}
@@ -131,7 +131,7 @@ export default function DynamicPricingPanel({ livePrice }: Props) {
 
         {/* Live price + mode */}
         <div className="space-y-2">
-          <div className="text-xs text-steel-100/50 uppercase">Live Price</div>
+          <div className="text-xs text-steel-100/50 uppercase">Current Price</div>
           <div className={`text-3xl font-bold ${priceColor}`}>
             {price.toFixed(3)}
             <span className="text-sm font-normal text-steel-300 ml-1">EGP/kWh</span>
@@ -185,7 +185,7 @@ export default function DynamicPricingPanel({ livePrice }: Props) {
 
         {/* Revenue streams */}
         <div>
-          <div className="text-xs text-steel-100/50 uppercase mb-2">Revenue Streams Today</div>
+          <div className="text-xs text-steel-100/50 uppercase mb-2">Today's Revenue</div>
           <div className="space-y-1.5">
             {revenueStreams.map((s) => (
               <div key={s.label}>
@@ -210,7 +210,7 @@ export default function DynamicPricingPanel({ livePrice }: Props) {
 
         {/* DR Events + Schedule */}
         <div className="space-y-2">
-          <div className="text-xs text-steel-100/50 uppercase">Demand Response</div>
+          <div className="text-xs text-steel-100/50 uppercase">Demand Response (DR)</div>
           <select
             onChange={(e) => { if (e.target.value) { injectDR(e.target.value); (e.target as HTMLSelectElement).value = ""; }}}
             disabled={busy === "dr"}
@@ -244,7 +244,7 @@ export default function DynamicPricingPanel({ livePrice }: Props) {
             <>
               <div className="text-xs text-steel-100/50 uppercase mt-2">Schedule Savings</div>
               <div className="text-xs text-emerald-400 font-medium">
-                {schedule.savings_vs_backtoback_egp.toFixed(0)} EGP vs back-to-back
+                +{schedule.savings_vs_backtoback_egp.toFixed(0)} EGP vs running back-to-back
               </div>
             </>
           )}

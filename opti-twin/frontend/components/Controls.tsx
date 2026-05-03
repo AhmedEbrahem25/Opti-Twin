@@ -74,7 +74,7 @@ export default function Controls() {
               : "bg-steel-700 hover:bg-steel-500 text-steel-100"
           }`}
         >
-          {aiOn ? "🤖 ON" : "AI: OFF"}
+          {aiOn ? "🤖 AI Active" : "AI Off"}
         </button>
       </div>
 
@@ -89,7 +89,7 @@ export default function Controls() {
               : "bg-steel-700 hover:bg-steel-500 text-steel-100"
           }`}
         >
-          {tou ? "TOU Reform Mode" : "Flat (current 1.60)"}
+          {tou ? "⏰ Peak / Off-Peak" : "Flat Rate (1.60 EGP)"}
         </button>
       </div>
 

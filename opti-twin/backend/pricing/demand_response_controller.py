@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from uuid import uuid4
 
-log = logging.getLogger("pricing.dr")
+log = logging.getLogger("opti-twin.pricing.dr")
 
 DR_RATES: Dict[str, float] = {
     "CURTAILMENT":        float(os.getenv("DPE_DR_CURTAILMENT_RATE_EGP", "250")),

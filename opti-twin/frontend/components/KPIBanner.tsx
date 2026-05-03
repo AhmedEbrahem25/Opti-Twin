@@ -33,11 +33,10 @@ export default function KPIBanner({
   const cf = t?.crisis_flags;
   const anyCrisis = cf && (cf.wall_overheat || cf.electrode_break || cf.grid_spike || cf.transformer_alarm);
 
-  // Derive a crisis label for the Health card sub-line
   const crisisLabel = cf
     ? cf.wall_overheat ? "🚨 Wall Overheat"
     : cf.electrode_break ? "🚨 Electrode Break"
-    : cf.grid_spike ? "🚨 Grid Hz Spike"
+    : cf.grid_spike ? "🚨 Grid Frequency Spike"
     : cf.transformer_alarm ? "🚨 Transformer Alarm"
     : null
     : null;
@@ -46,33 +45,33 @@ export default function KPIBanner({
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
-      <Card title="💰 Saved Today" value={`${fmt(egpSavedToday, 0)} EGP`} sub="modelled" />
+      <Card title="Saved Today" value={`${fmt(egpSavedToday, 0)} EGP`} sub="est. savings" />
       <Card
-        title="⚡ Cost Now"
+        title="Running Cost"
         value={`${fmt(costNow, 0)} EGP/hr`}
-        sub={`@ ${t?.electricity_price?.toFixed(2) ?? "—"} EGP/kWh`}
+        sub={`${t?.electricity_price?.toFixed(2) ?? "—"} EGP/kWh`}
         pulse={cf?.grid_spike}
       />
       <Card
-        title="🌡️ Bath Temp"
+        title="Bath Temp"
         value={`${fmt(t?.furnace_bath_temp ?? 0, 0)} °C`}
-        sub="target 1,600–1,650"
+        sub="target 1,600–1,650 °C"
         pulse={cf?.wall_overheat}
         valueClass={cf?.wall_overheat ? "text-red-400" : undefined}
       />
       <Card
-        title="🔌 Power Factor"
+        title="Power Factor"
         value={t ? t.power_factor.toFixed(2) : "—"}
-        sub={pfBracket ? "⚠ penalty bracket" : "✓ above 0.92"}
+        sub={pfBracket ? "⚠ penalty active" : "✓ OK (above 0.92)"}
         valueClass={pfBracket ? "text-amber-400" : "text-emerald-400"}
       />
       <Card
-        title="🏭 Health"
+        title="Machine Health"
         value={anyCrisis ? "CRISIS" : health}
         sub={crisisLabel ?? lastRec?.production_status ?? "—"}
         valueClass={anyCrisis ? "text-red-400 animate-pulse" : healthColor}
       />
-      <Card title="♻️ CO₂ Saved" value={`${fmt(co2SavedKg, 1)} kg`} sub="today" />
+      <Card title="CO₂ Saved" value={`${fmt(co2SavedKg, 1)} kg`} sub="today" />
     </div>
   );
 }

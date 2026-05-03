@@ -10,11 +10,14 @@ cooling, transformer derate, grid ride-through).
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
+
+_log = logging.getLogger("ai.agent")
 
 try:
     from stable_baselines3 import PPO
@@ -54,12 +57,12 @@ class OptiTwinAgent:
         if model_path and os.path.exists(model_path) and PPO is not None:
             try:
                 self.model = PPO.load(model_path)
-                print(f"[ai] loaded PPO model from {model_path}", flush=True)
+                _log.info("Loaded PPO model from %s", model_path)
             except Exception as exc:  # pragma: no cover
-                print(f"[ai] failed to load PPO ({exc}); using scripted policy", flush=True)
+                _log.warning("Failed to load PPO model (%s) — using scripted policy", exc)
                 self.model = None
         else:
-            print("[ai] using scripted fallback policy", flush=True)
+            _log.info("No PPO model found at %s — using scripted fallback policy", model_path)
 
     # ------- Public API -------
     def recommend(self, state: Dict[str, Any]) -> AIRecommendation:

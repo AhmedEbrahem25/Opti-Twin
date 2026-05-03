@@ -9,6 +9,7 @@ import XAIDecisionLog from "../components/XAIDecisionLog";
 import Controls from "../components/Controls";
 import DynamicPricingPanel from "../components/DynamicPricingPanel";
 import PricingEventLog from "../components/PricingEventLog";
+import LogViewer from "../components/LogViewer";
 
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -48,7 +49,7 @@ export default function Dashboard() {
               Opti-Twin <span className="text-flame-400">Live</span>
             </h1>
             <p className="text-xs text-steel-100/60 mt-1">
-              Egyptian EAF energy intelligence · NextCity AI Hack 2026 · v2.0
+              EAF Energy Optimization · NextCity AI 2026
             </p>
           </div>
           <ConnectionBadge state={frame.connection} />
@@ -80,11 +81,10 @@ export default function Dashboard() {
 
         <PricingEventLog />
 
+        <LogViewer />
+
         <footer className="text-center text-xs text-steel-100/40 mt-6 py-4 border-t border-white/5">
-          Tariff: <strong>1.60 EGP/kWh UHV flat</strong> (EgyptERA Aug 2024) ·
-          Furnace ref: <strong>Ezz Flat Steel Ain Sokhna EAF #2</strong> (Source: Global Energy Monitor) ·
-          Grid CO₂: <strong>0.50 kg/kWh</strong> (IEA / Climatiq, Egypt) ·
-          All daily numbers are modelled estimates.
+          Tariff: 1.60 EGP/kWh · Furnace ref: Ezz Flat Steel Ain Sokhna EAF #2 · Grid CO₂: 0.50 kg/kWh · Numbers are modelled estimates.
         </footer>
       </div>
     </>

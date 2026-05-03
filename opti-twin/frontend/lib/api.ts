@@ -35,6 +35,21 @@ export const api = {
   injectDREvent: (event_type: string, mw_requested: number, duration_minutes: number) =>
     post("/api/v1/pricing/dr/inject", { event_type, mw_requested, duration_minutes }),
 
+  // Log viewer
+  getLogs: (params?: {
+    level?: string;
+    service?: string;
+    q?: string;
+    limit?: number;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.level)   qs.set("level",   params.level);
+    if (params?.service) qs.set("service", params.service);
+    if (params?.q)       qs.set("q",       params.q);
+    if (params?.limit)   qs.set("limit",   String(params.limit));
+    return get(`/api/v1/logs?${qs.toString()}`);
+  },
+
   // Pricing Event Search
   searchPricingEvents: (params: {
     q?: string;

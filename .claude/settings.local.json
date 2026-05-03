@@ -15,7 +15,14 @@
       "Bash(docker buildx *)",
       "Bash(docker system *)",
       "Bash(docker info *)",
-      "Bash(curl *)"
+      "Bash(curl *)",
+      "Bash(Get-ChildItem -Path \"F:\\\\Projects\\\\NextCity AI 2026\\\\opti-twin\" -Directory)",
+      "PowerShell(Get-ChildItem -Path \"F:\\\\Projects\\\\NextCity AI 2026\\\\opti-twin\" -Directory | ForEach-Object { $_.FullName })",
+      "Bash(Get-ChildItem -File -Include \"*log*\", \"*config*\", \"*.yaml\", \"*.yml\", \"*.toml\" -Recurse)",
+      "Bash(timeout 8 docker logs opti-twin-backend --follow)",
+      "Bash(timeout 8 docker logs opti-twin-ai --follow)",
+      "Bash(timeout 8 docker logs opti-twin-sim --follow)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('total:', d['stats']['total']\\); print\\('services:', d['stats']['services']\\); print\\('by_level:', d['stats']['by_level']\\); [print\\(e['ts'][:19], e['level'], e['service'], e['msg'][:60]\\) for e in d['logs'][:5]]\")"
     ]
   }
 }

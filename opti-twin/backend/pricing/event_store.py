@@ -7,10 +7,13 @@ No external dependency — survives in Redis-only deployments.
 """
 from __future__ import annotations
 
+import logging
 import threading
 from collections import deque
 from datetime import datetime, timezone
 from typing import Deque, Dict, List, Optional
+
+log = logging.getLogger("opti-twin.pricing.events")
 
 MAX_EVENTS = 500
 SPIKE_PRICE_THRESHOLD = 2.0   # EGP — only flag spikes above this
@@ -136,6 +139,7 @@ class PricingEventStore:
             # Peak transition
             if self._last_is_peak is not None and is_peak != self._last_is_peak:
                 kind = "peak_start" if is_peak else "peak_end"
+                log.info("Peak transition: %s  price=%.3f EGP/kWh", kind, price)
                 self._events.append(PricingEvent(kind, {
                     "price_egp_kwh": round(price, 4),
                     "is_peak": is_peak,
@@ -150,6 +154,8 @@ class PricingEventStore:
                 and self._last_price > 0
                 and (price / self._last_price - 1) * 100 >= SPIKE_JUMP_PCT
             ):
+                jump = (price / self._last_price - 1) * 100
+                log.warning("Price spike detected: %.3f EGP/kWh  (+%.0f%%)", price, jump)
                 self._events.append(PricingEvent("price_spike", {
                     "price_egp_kwh": round(price, 4),
                     "is_peak": is_peak,
@@ -189,6 +195,7 @@ class PricingEventStore:
             }))
 
     def record_mode_change(self, from_mode: str, to_mode: str) -> None:
+        log.info("Pricing mode changed: %s → %s", from_mode, to_mode)
         with self._lock:
             self._events.append(PricingEvent("mode_change", {
                 "mode_from": from_mode,

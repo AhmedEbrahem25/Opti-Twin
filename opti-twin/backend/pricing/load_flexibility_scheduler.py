@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass
 from typing import Dict, List
 
-log = logging.getLogger("pricing.scheduler")
+log = logging.getLogger("opti-twin.pricing.scheduler")
 
 HEAT_DURATION_H = 70 / 60       # 70 minutes
 MIN_GAP_H = 5 / 60              # 5-minute refractory recovery
@@ -105,6 +105,11 @@ class LoadFlexibilityScheduler:
             earliest = best_start + HEAT_DURATION_H + MIN_GAP_H
 
         self._last_schedule = slots
+        if slots:
+            log.info(
+                "Schedule optimised: %d heats  total_cost=%.0f EGP  first_start=%.2fh",
+                len(slots), sum(s.total_cost_egp for s in slots), slots[0].start_hour,
+            )
         return slots
 
     def savings_vs_backtoback(
