@@ -1,0 +1,37 @@
+# Domain synonym dictionary for Opti-Search Meilisearch index.
+# Per upgrade.md §8.4 — bilingual EN + AR + canonical form.
+# Loaded once at index init; hot-reload is post-event.
+
+synonyms:
+  # Power factor / electrical
+  - [pf, "power factor", "معامل القدرة"]
+  - [eaf, "electric arc furnace", furnace, "فرن قوس كهربائي"]
+  - [mvar, "reactive power", "قدرة رد فعلية"]
+  - [mw, "megawatt", "ميغاواط"]
+
+  # Tariff / pricing
+  - [tou, "time-of-use", "تعرفة زمنية", "tariff"]
+  - [peak, "peak hours", "ساعات الذروة", "peak window"]
+  - [off-peak, "off peak", "خارج الذروة"]
+  - [spot, "spot price", "spot market", "سعر السوق الفوري"]
+
+  # AI actions (canonical labels ↔ human-readable EN ↔ Arabic)
+  - [pre_peak_drop, "pre peak drop", "خفض ما قبل الذروة"]
+  - [reduce_arc_power, "reduce arc power", "خفض قدرة القوس"]
+  - [emergency_cooling, "emergency cooling", "تبريد طارئ"]
+  - [transformer_derate, "transformer derate", "خفض المحول"]
+  - [grid_ride_through, "grid ride through", "ride through", "استجابة الشبكة"]
+  - [raise_pf_compensation, "raise pf compensation", "رفع معامل القدرة"]
+  - [hold_steady, "hold steady", "ثبات"]
+
+  # Crises / safety
+  - [overheat, "wall overheat", "ارتفاع حرارة الجدار", "thermal alarm"]
+  - [grid_spike, "grid frequency", "تذبذب الشبكة", "frequency drop"]
+  - [transformer_alarm, "transformer", "إنذار المحول"]
+  - [override, "safety override", "تجاوز السلامة", "mask"]
+  - [bath_freeze, "bath freeze", "تجمد الحوض"]
+
+  # Demand response (post-AI-layer additions)
+  - [dr, "demand response", "استجابة الطلب"]
+  - [curtailment, "curtailment", "تخفيض الحمل"]
+  - [interruptible, "interruptible", "قابل للمقاطعة"]

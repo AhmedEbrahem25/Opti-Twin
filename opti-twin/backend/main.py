@@ -24,6 +24,11 @@ Endpoints:
   Logs:
   GET  /api/v1/logs                   — query in-memory log buffer (all services)
   GET  /api/v1/logs/stats             — log counts by level / service
+
+  Search (Opti-Search demo slice):
+  GET  /api/v1/search                 — hybrid lexical + filter search (decision/crisis/safety_rollback)
+  GET  /api/v1/search/health          — Meili index status + doc count
+  GET  /api/v1/search/saved/default   — canonical "shift overrides" preset
 """
 
 from __future__ import annotations
@@ -58,6 +63,9 @@ from pricing.demand_response_controller import DemandResponseController
 from pricing.event_store import PricingEventStore
 from pricing.load_flexibility_scheduler import LoadFlexibilityScheduler
 from pricing.price_signal_broker import PriceSignalBroker
+from search import routes as search_routes
+from search.indexer import Indexer
+from search.meili_client import MeiliWrapper
 from pricing.revenue_optimizer import RevenueOptimizer
 from services.kpi_calculator import KPICalculator
 from services.log_config import setup_logging, get_memory_handler
@@ -66,6 +74,7 @@ from services.redis_broker import RedisBroker
 DPE_ENABLED          = os.getenv("DPE_ENABLED", "false").lower() == "true"
 DPE_PRICE_INTERVAL   = int(os.getenv("DPE_PRICE_UPDATE_INTERVAL_SECONDS", "60"))
 DPE_FORECAST_INTERVAL = int(os.getenv("DPE_FORECAST_UPDATE_INTERVAL_SECONDS", "1800"))
+SEARCH_ENABLED       = os.getenv("SEARCH_ENABLED", "true").lower() == "true"
 
 # ── Logging setup (must be first) ─────────────────────────────────────────────
 _mem = setup_logging(service="backend")
@@ -206,11 +215,31 @@ async def lifespan(app: FastAPI):
     log.info("Redis connected — host=%s port=%s", os.getenv("REDIS_HOST", "redis"), os.getenv("REDIS_PORT", "6379"))
     consumer_task = asyncio.create_task(consume_redis())
     pricing_task  = asyncio.create_task(price_publisher())
+
+    # ── Opti-Search indexer ───────────────────────────────────────────────
+    indexer_tasks: list = []
+    meili: Optional[MeiliWrapper] = None
+    if SEARCH_ENABLED:
+        try:
+            meili = MeiliWrapper()
+            await asyncio.to_thread(meili.connect)
+            await asyncio.to_thread(meili.init_index)
+            search_routes.mount(meili)
+            app.include_router(search_routes.router)
+            indexer = Indexer(meili, state.broker)
+            indexer_tasks = await indexer.start_all()
+            log.info("Opti-Search indexer started (3 subscribers)")
+        except Exception as exc:
+            log.warning("Opti-Search disabled (init failed: %s)", exc)
+            meili = None
+
     log.info("Backend ready on :8000")
     try:
         yield
     finally:
         log.info("Backend shutting down")
+        for t in indexer_tasks:
+            t.cancel()
         consumer_task.cancel()
         pricing_task.cancel()
         await state.broker.disconnect()

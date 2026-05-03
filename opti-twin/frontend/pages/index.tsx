@@ -10,6 +10,8 @@ import Controls from "../components/Controls";
 import DynamicPricingPanel from "../components/DynamicPricingPanel";
 import PricingEventLog from "../components/PricingEventLog";
 import LogViewer from "../components/LogViewer";
+import CommandPalette from "../components/search/CommandPalette";
+import SavedSearchBanner from "../components/search/SavedSearchBanner";
 
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -36,6 +38,7 @@ export default function Dashboard() {
 
   const t = frame.telemetry;
   const peakActive = !!(t?.tou_mode && t?.is_peak);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   return (
     <>
@@ -52,8 +55,20 @@ export default function Dashboard() {
               EAF Energy Optimization · NextCity AI 2026
             </p>
           </div>
-          <ConnectionBadge state={frame.connection} />
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setPaletteOpen(true)}
+              className="hidden md:flex items-center gap-2 rounded-lg border border-steel-500/30 bg-steel-800/40 px-3 py-1.5 text-xs text-steel-100/70 hover:bg-steel-700/60"
+              title="Search decisions, crises, safety overrides"
+            >
+              🔍 <span>Search</span>
+              <kbd className="rounded bg-steel-700/60 px-1.5 py-0.5 text-[10px]">⌘K</kbd>
+            </button>
+            <ConnectionBadge state={frame.connection} />
+          </div>
         </header>
+
+        <SavedSearchBanner onOpenPalette={() => setPaletteOpen(true)} />
 
         <KPIBanner
           telemetry={t}
@@ -87,6 +102,7 @@ export default function Dashboard() {
           Tariff: 1.60 EGP/kWh · Furnace ref: Ezz Flat Steel Ain Sokhna EAF #2 · Grid CO₂: 0.50 kg/kWh · Numbers are modelled estimates.
         </footer>
       </div>
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </>
   );
 }

@@ -35,7 +35,11 @@
       "Bash(docker --version)",
       "Skill(claude-api)",
       "PowerShell(Move-Item *)",
-      "Bash(docker exec *)"
+      "Bash(docker exec *)",
+      "Bash(Select-Object Name)",
+      "Bash(echo \"[exit=$?]\")",
+      "Bash(python -m json.tool)",
+      "Bash(git *)"
     ]
   }
 }

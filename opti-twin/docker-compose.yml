@@ -11,6 +11,22 @@ services:
       timeout: 3s
       retries: 5
 
+  meilisearch:
+    image: getmeili/meilisearch:v1.10
+    container_name: opti-twin-meili
+    environment:
+      - MEILI_MASTER_KEY=${MEILI_MASTER_KEY:-opti-twin-demo-master-key}
+      - MEILI_ENV=development
+      - MEILI_NO_ANALYTICS=true
+    volumes:
+      - ./data/meili:/meili_data
+    networks: [opti-twin-network]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7700/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   ai_engine:
     build: ./ai_engine
     container_name: opti-twin-ai
@@ -70,8 +86,13 @@ services:
       - PF_REFERENCE=${PF_REFERENCE:-0.92}
       - EAF_MAX_POWER_MW=${EAF_MAX_POWER_MW:-110}
       - EAF_FURNACE_SIZE_T=${EAF_FURNACE_SIZE_T:-185}
+      - MEILI_URL=http://meilisearch:7700
+      - MEILI_MASTER_KEY=${MEILI_MASTER_KEY:-opti-twin-demo-master-key}
+      - SEARCH_ENABLED=${SEARCH_ENABLED:-true}
     depends_on:
       redis:
+        condition: service_healthy
+      meilisearch:
         condition: service_healthy
     networks: [opti-twin-network]
 
