@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
+import type { SearchFocus } from "../lib/searchFocus";
 
 type LogEntry = {
   ts: string;
@@ -114,7 +115,7 @@ function LogRow({ entry }: { entry: LogEntry }) {
   );
 }
 
-export default function LogViewer() {
+export default function LogViewer({ focused }: { focused?: SearchFocus | null }) {
   const [logs, setLogs]           = useState<LogEntry[]>([]);
   const [stats, setStats]         = useState<Stats | null>(null);
   const [levelFilter, setLevel]   = useState("");
@@ -123,8 +124,22 @@ export default function LogViewer() {
   const [autoRefresh, setAuto]    = useState(true);
   const [autoScroll, setScroll]   = useState(true);
   const [open, setOpen]           = useState(false);
+  const [flash, setFlash]         = useState(false);
   const bottomRef                 = useRef<HTMLDivElement>(null);
+  const containerRef              = useRef<HTMLDivElement>(null);
   const debRef                    = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Claim "crisis" focus events as a fallback target — auto-expand + flash.
+  useEffect(() => {
+    if (!focused || focused.type !== "crisis") return;
+    setOpen(true);
+    requestAnimationFrame(() => {
+      containerRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+    setFlash(true);
+    const t = setTimeout(() => setFlash(false), 2_000);
+    return () => clearTimeout(t);
+  }, [focused?.doc_id, focused?.type]);
 
   const fetchLogs = async (lv: string, svc: string, query: string) => {
     try {
@@ -157,7 +172,7 @@ export default function LogViewer() {
   const critCount = stats?.by_level["CRITICAL"] ?? 0;
 
   return (
-    <div className="glass rounded-xl mt-4">
+    <div ref={containerRef} className={`glass rounded-xl mt-4 ${flash ? "opti-flash" : ""}`}>
       {/* Header bar (always visible) */}
       <button
         onClick={() => { setOpen((v) => !v); if (!open) fetchLogs(levelFilter, svcFilter, q); }}

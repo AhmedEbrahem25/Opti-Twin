@@ -74,6 +74,19 @@ export async function getDefaultSavedSearch(): Promise<SavedSearchDefault> {
   return res.json();
 }
 
+export interface SearchHealth {
+  meili: "ok" | "degraded" | "down";
+  docs: number;
+}
+
+export async function getSearchHealth(): Promise<SearchHealth> {
+  const res = await fetch(`${BACKEND_URL}/api/v1/search/health`);
+  if (!res.ok) {
+    return { meili: "down", docs: 0 };
+  }
+  return res.json();
+}
+
 /** Detects whether a query string contains Arabic codepoints. */
 export function isArabic(s: string): boolean {
   return /[؀-ۿݐ-ݿࢠ-ࣿ]/.test(s);
