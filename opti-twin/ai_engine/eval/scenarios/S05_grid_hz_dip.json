@@ -1,0 +1,13 @@
+{
+  "id": "S05",
+  "name": "Grid Hz dip 49.6",
+  "description": "Ride-through. Forces GRID_RIDE_THROUGH for sustained duration.",
+  "seed": 1000005,
+  "duration_steps": 480,
+  "difficulty": "medium",
+  "initial_state_overrides": {},
+  "crisis_schedule": [
+    {"tick": 60,  "type": "grid_spike", "magnitude": 0.4},
+    {"tick": 200, "type": "grid_spike", "magnitude": 0.4}
+  ]
+}

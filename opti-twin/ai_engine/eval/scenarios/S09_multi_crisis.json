@@ -1,0 +1,13 @@
+{
+  "id": "S09",
+  "name": "Multi-crisis (wall+grid in 60 sim-sec)",
+  "description": "Priority arbitration. Wall takes precedence over grid in safety mask.",
+  "seed": 1000009,
+  "duration_steps": 480,
+  "difficulty": "hard",
+  "initial_state_overrides": {},
+  "crisis_schedule": [
+    {"tick": 200, "type": "wall_overheat", "magnitude": 80.0},
+    {"tick": 220, "type": "grid_spike", "magnitude": 0.6}
+  ]
+}

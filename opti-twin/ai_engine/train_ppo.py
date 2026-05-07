@@ -2,24 +2,22 @@
 Train the Opti-Twin PPO policy.
 
 Pipeline:
-  1. Roll out the scripted policy (`agent.OptiTwinAgent._scripted_policy`) over
-     the env to collect ~50K (obs, action) pairs.
-  2. Train an MLP classifier (the "BC warm start") to imitate that scripted
-     policy. ~10 epochs; ~2 min on CPU.
-  3. Initialise a Stable-Baselines3 PPO agent and copy the BC-trained weights
-     into its policy network.
-  4. Fine-tune with PPO on the same env for `--total-timesteps` steps.
-  5. Save final model to `models/opti_twin_ppo.zip`.
+  1. Load a pre-trained BC warm-start checkpoint (`--bc-init`) produced by
+     `train_bc.py`. Falls back to inline scripted-rollout BC behind
+     `--legacy-inline-bc` for parity with the pre-Phase-A pipeline.
+  2. Initialise a Stable-Baselines3 PPO agent and copy the BC weights into
+     its policy network.
+  3. Fine-tune with PPO on `OptiTwinEAFEnv` for `--total-timesteps` steps.
+  4. Save final model to `--output` (default `models/opti_twin_ppo.zip`).
 
 Usage:
-    python train_ppo.py                       # defaults: 200K timesteps, seed 42
-    python train_ppo.py --total-timesteps 50000 --bc-pairs 10000   # quick run
+    python train_ppo.py --bc-init models/bc/v0.1.0/bc_init.pt
+    python train_ppo.py --legacy-inline-bc --bc-pairs 10000 --total-timesteps 50000
 """
 
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 from typing import List, Tuple
@@ -37,11 +35,12 @@ sys.path.insert(0, str(HERE))
 
 from agent import OptiTwinAgent
 from environment import ACTIONS, OBS_DIM, OptiTwinEAFEnv, make_obs_vector
+from policies.bc_policy import BCNet, init_ppo_from_bc, load_bc_net
 
 
 def collect_bc_dataset(n_pairs: int, seed: int) -> Tuple[np.ndarray, np.ndarray]:
-    """Roll out the scripted policy, return (obs[N,32], actions[N])."""
-    teacher = OptiTwinAgent(model_path=None)  # forces scripted fallback
+    """Inline scripted-rollout collection (legacy --legacy-inline-bc path)."""
+    teacher = OptiTwinAgent(model_path=None)
     env = OptiTwinEAFEnv()
     obs_buf: List[np.ndarray] = []
     act_buf: List[int] = []
@@ -50,8 +49,6 @@ def collect_bc_dataset(n_pairs: int, seed: int) -> Tuple[np.ndarray, np.ndarray]
     while len(obs_buf) < n_pairs:
         label = teacher._scripted_policy(env._state)
         if label not in ACTIONS:
-            # Scripted policy can emit labels the env doesn't simulate (e.g. in
-            # legacy code paths). Map to the safest fallback.
             label = "HOLD_STEADY"
         action_id = ACTIONS.index(label)
         obs_buf.append(obs.copy())
@@ -63,31 +60,15 @@ def collect_bc_dataset(n_pairs: int, seed: int) -> Tuple[np.ndarray, np.ndarray]
     return np.asarray(obs_buf, dtype=np.float32), np.asarray(act_buf, dtype=np.int64)
 
 
-class BCNet(nn.Module):
-    """MLP matching SB3 default MlpPolicy net_arch (pi=[64,64])."""
-
-    def __init__(self, obs_dim: int, n_actions: int) -> None:
-        super().__init__()
-        self.shared = nn.Sequential(
-            nn.Linear(obs_dim, 64),
-            nn.Tanh(),
-            nn.Linear(64, 64),
-            nn.Tanh(),
-        )
-        self.head = nn.Linear(64, n_actions)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.head(self.shared(x))
-
-
-def train_bc(obs: np.ndarray, actions: np.ndarray, *, epochs: int, batch_size: int, lr: float) -> BCNet:
+def train_bc_inline(obs: np.ndarray, actions: np.ndarray, *,
+                    epochs: int, batch_size: int, lr: float) -> BCNet:
     net = BCNet(OBS_DIM, len(ACTIONS))
     optim = torch.optim.Adam(net.parameters(), lr=lr)
     loss_fn = nn.CrossEntropyLoss()
     obs_t = torch.from_numpy(obs)
     act_t = torch.from_numpy(actions)
     n = len(obs)
-    print(f"[BC] training on {n} pairs, {epochs} epochs, batch={batch_size}")
+    print(f"[BC inline] training on {n} pairs, {epochs} epochs, batch={batch_size}")
     for ep in range(epochs):
         perm = torch.randperm(n)
         ep_loss = 0.0
@@ -101,36 +82,8 @@ def train_bc(obs: np.ndarray, actions: np.ndarray, *, epochs: int, batch_size: i
             optim.step()
             ep_loss += float(loss) * len(idx)
             ep_correct += int((logits.argmax(-1) == act_t[idx]).sum())
-        print(f"[BC] epoch {ep+1:2d}/{epochs}  loss={ep_loss / n:.4f}  acc={ep_correct / n:.3f}")
+        print(f"[BC inline] epoch {ep+1:2d}/{epochs}  loss={ep_loss / n:.4f}  acc={ep_correct / n:.3f}")
     return net
-
-
-def init_ppo_from_bc(ppo: PPO, bc: BCNet) -> None:
-    """Copy BC MLP weights into PPO's MlpPolicy (matches default net_arch)."""
-    policy_state = ppo.policy.state_dict()
-    bc_state = bc.state_dict()
-
-    # SB3 MlpPolicy default architecture mapping:
-    #   policy.mlp_extractor.policy_net.0.{weight,bias}  <- bc.shared.0.*
-    #   policy.mlp_extractor.policy_net.2.{weight,bias}  <- bc.shared.2.*
-    #   policy.action_net.{weight,bias}                  <- bc.head.*
-    mapping = {
-        "shared.0.weight": "mlp_extractor.policy_net.0.weight",
-        "shared.0.bias":   "mlp_extractor.policy_net.0.bias",
-        "shared.2.weight": "mlp_extractor.policy_net.2.weight",
-        "shared.2.bias":   "mlp_extractor.policy_net.2.bias",
-        "head.weight":     "action_net.weight",
-        "head.bias":       "action_net.bias",
-    }
-    copied = 0
-    for bc_key, ppo_key in mapping.items():
-        if ppo_key in policy_state and bc_key in bc_state and policy_state[ppo_key].shape == bc_state[bc_key].shape:
-            policy_state[ppo_key] = bc_state[bc_key].clone()
-            copied += 1
-        else:
-            print(f"[BC->PPO] skipped {bc_key} -> {ppo_key} (shape mismatch or missing)")
-    ppo.policy.load_state_dict(policy_state)
-    print(f"[BC->PPO] copied {copied}/{len(mapping)} tensors into PPO policy")
 
 
 class _GymCompat(gym.Env):
@@ -138,9 +91,13 @@ class _GymCompat(gym.Env):
 
     metadata = {"render_modes": []}
 
-    def __init__(self, weights=None) -> None:
+    def __init__(self, weights=None, *, forecaster=None, anomaly_detector=None) -> None:
         super().__init__()
-        self._env = OptiTwinEAFEnv(weights)
+        self._env = OptiTwinEAFEnv(
+            weights,
+            forecaster=forecaster,
+            anomaly_detector=anomaly_detector,
+        )
         self.observation_space = self._env.observation_space
         self.action_space = self._env.action_space
         self.render_mode = None
@@ -152,17 +109,89 @@ class _GymCompat(gym.Env):
         return self._env.step(int(action))
 
 
-def _make_env(weights=None):
-    return Monitor(_GymCompat(weights))
+def _make_env(weights=None, *, forecaster=None, anomaly_detector=None):
+    return Monitor(_GymCompat(weights, forecaster=forecaster, anomaly_detector=anomaly_detector))
+
+
+def _eval_policy_quick(ppo: PPO, env, episodes: int = 5) -> float:
+    """Quick mean-reward eval on a fresh env. Used by Optuna trial scoring."""
+    rewards = []
+    for ep in range(episodes):
+        obs, _ = env.reset(seed=10_000 + ep)
+        total = 0.0
+        while True:
+            action, _ = ppo.predict(obs, deterministic=True)
+            obs, r, term, trunc, _ = env.step(int(action))
+            total += float(r)
+            if term or trunc:
+                break
+        rewards.append(total)
+    return float(np.mean(rewards))
+
+
+def run_optuna_study(args, bc_net, forecaster, anomaly_detector) -> dict:
+    """Run an Optuna TPE study on a 50K-step proxy task. Returns the best
+    hyperparameters as a dict suitable for spreading into PPO(...).
+    """
+    import optuna
+    from policies.bc_policy import init_ppo_from_bc as inject
+
+    def objective(trial: "optuna.Trial") -> float:
+        lr = trial.suggest_float("learning_rate", 1e-5, 1e-3, log=True)
+        clip = trial.suggest_float("clip_range", 0.1, 0.3)
+        ent = trial.suggest_float("ent_coef", 1e-4, 5e-2, log=True)
+        gamma = trial.suggest_float("gamma", 0.95, 0.999)
+        n_steps = trial.suggest_categorical("n_steps", [1024, 2048, 4096])
+
+        env = _make_env(forecaster=forecaster, anomaly_detector=anomaly_detector)
+        ppo = PPO(
+            "MlpPolicy", env,
+            learning_rate=lr, clip_range=clip, ent_coef=ent,
+            gamma=gamma, n_steps=n_steps,
+            batch_size=64, n_epochs=10, seed=args.seed, verbose=0,
+        )
+        inject(ppo, bc_net)
+        ppo.learn(total_timesteps=args.tune_budget, progress_bar=False)
+        return _eval_policy_quick(ppo, _make_env(
+            forecaster=forecaster, anomaly_detector=anomaly_detector,
+        ), episodes=3)
+
+    study = optuna.create_study(direction="maximize",
+                                 sampler=optuna.samplers.TPESampler(seed=args.seed))
+    study.optimize(objective, n_trials=args.tune_trials, show_progress_bar=False)
+    print(f"[tune] best value = {study.best_value:.2f}")
+    print(f"[tune] best params = {study.best_params}")
+    return dict(study.best_params)
 
 
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--total-timesteps", type=int, default=200_000)
-    p.add_argument("--bc-pairs", type=int, default=50_000)
-    p.add_argument("--bc-epochs", type=int, default=10)
-    p.add_argument("--bc-batch", type=int, default=256)
-    p.add_argument("--bc-lr", type=float, default=3e-4)
+    p.add_argument("--bc-init", default=str(HERE / "models" / "bc" / "v0.2.0" / "bc_init.pt"),
+                   help="Path to a BC checkpoint produced by train_bc.py. Use --legacy-inline-bc to bypass.")
+    p.add_argument("--forecaster", default=None,
+                   help="Path to M2 forecaster directory; populates env obs dims 16-21")
+    p.add_argument("--anomaly", default=None,
+                   help="Path to M3 anomaly detector directory; populates env obs dim 38")
+    p.add_argument("--tune", action="store_true",
+                   help="Run Optuna hyperparam search before the final training pass.")
+    p.add_argument("--tune-trials", type=int, default=15,
+                   help="Number of Optuna trials when --tune is set.")
+    p.add_argument("--tune-budget", type=int, default=50_000,
+                   help="Steps per trial when --tune is set.")
+    p.add_argument("--legacy-inline-bc", action="store_true",
+                   help="Run pre-Phase-A inline BC instead of loading a checkpoint.")
+    p.add_argument("--bc-pairs", type=int, default=50_000, help="(legacy inline BC only)")
+    p.add_argument("--bc-epochs", type=int, default=10, help="(legacy inline BC only)")
+    p.add_argument("--bc-batch", type=int, default=256, help="(legacy inline BC only)")
+    p.add_argument("--bc-lr", type=float, default=3e-4, help="(legacy inline BC only)")
+    p.add_argument("--learning-rate", type=float, default=3e-4)
+    p.add_argument("--n-steps", type=int, default=2048)
+    p.add_argument("--batch-size", type=int, default=64)
+    p.add_argument("--n-epochs", type=int, default=10)
+    p.add_argument("--gamma", type=float, default=0.99)
+    p.add_argument("--clip-range", type=float, default=0.2)
+    p.add_argument("--ent-coef", type=float, default=0.01)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--output", default=str(HERE / "models" / "opti_twin_ppo.zip"))
     args = p.parse_args()
@@ -175,41 +204,76 @@ def main() -> None:
 
     print(f"[opti-twin] training PPO  seed={args.seed}  out={out_path}")
 
-    # 1+2. BC warm start
-    print(f"[step 1/4] collecting {args.bc_pairs} scripted-policy rollouts...")
-    obs, acts = collect_bc_dataset(args.bc_pairs, seed=args.seed)
-    print(f"[step 1/4] action distribution:")
-    for i, lab in enumerate(ACTIONS):
-        n = int((acts == i).sum())
-        print(f"           {lab:<22} {n:6d}  ({n/len(acts)*100:.1f}%)")
+    # Step 1: BC warm start -- prefer pre-trained checkpoint, fall back to inline.
+    bc_net: BCNet
+    if args.legacy_inline_bc:
+        print(f"[step 1/3] collecting {args.bc_pairs} scripted rollouts (legacy inline BC)")
+        bc_obs, bc_acts = collect_bc_dataset(args.bc_pairs, seed=args.seed)
+        for i, lab in enumerate(ACTIONS):
+            n = int((bc_acts == i).sum())
+            print(f"           {lab:<22} {n:6d}  ({n/len(bc_acts)*100:.1f}%)")
+        bc_net = train_bc_inline(
+            bc_obs, bc_acts,
+            epochs=args.bc_epochs, batch_size=args.bc_batch, lr=args.bc_lr,
+        )
+    else:
+        bc_path = Path(args.bc_init)
+        if not bc_path.exists():
+            raise SystemExit(
+                f"[opti-twin] BC checkpoint not found at {bc_path}. "
+                f"Run train_bc.py first or pass --legacy-inline-bc."
+            )
+        print(f"[step 1/3] loading BC checkpoint from {bc_path}")
+        bc_net = load_bc_net(bc_path, obs_dim=OBS_DIM, n_actions=len(ACTIONS))
 
-    print(f"[step 2/4] training BC MLP...")
-    bc_net = train_bc(obs, acts, epochs=args.bc_epochs, batch_size=args.bc_batch, lr=args.bc_lr)
+    # Optional M2/M3 hooks
+    forecaster = None
+    anomaly_detector = None
+    if args.forecaster:
+        from forecaster.lstm_forecaster import load_forecaster
+        forecaster = load_forecaster(args.forecaster)
+        print(f"[opti-twin] M2 forecaster loaded from {args.forecaster}")
+    if args.anomaly:
+        from anomaly.autoencoder import load_anomaly_detector
+        anomaly_detector = load_anomaly_detector(args.anomaly)
+        print(f"[opti-twin] M3 anomaly detector loaded from {args.anomaly}")
 
-    # 3. Init PPO and inject BC weights
-    print(f"[step 3/4] initialising PPO and copying BC weights...")
-    env = _make_env()
+    # Optional: Optuna hyperparam search before the final training pass.
+    tuned_params: dict[str, float] = {}
+    if args.tune:
+        print(f"[opti-twin] launching Optuna TPE study  trials={args.tune_trials}  "
+              f"budget={args.tune_budget} steps/trial")
+        tuned_params = run_optuna_study(args, bc_net, forecaster, anomaly_detector)
+
+    # Step 2: Initialise PPO and inject BC weights.
+    print(f"[step 2/3] initialising PPO and copying BC weights...")
+    env = _make_env(forecaster=forecaster, anomaly_detector=anomaly_detector)
     ppo = PPO(
         "MlpPolicy",
         env,
-        learning_rate=3e-4,
-        n_steps=2048,
-        batch_size=64,
-        n_epochs=10,
-        gamma=0.99,
-        ent_coef=0.01,
-        clip_range=0.2,
+        learning_rate=tuned_params.get("learning_rate", args.learning_rate),
+        n_steps=int(tuned_params.get("n_steps", args.n_steps)),
+        batch_size=args.batch_size,
+        n_epochs=args.n_epochs,
+        gamma=tuned_params.get("gamma", args.gamma),
+        ent_coef=tuned_params.get("ent_coef", args.ent_coef),
+        clip_range=tuned_params.get("clip_range", args.clip_range),
         seed=args.seed,
         verbose=0,
     )
     init_ppo_from_bc(ppo, bc_net)
 
-    # 4. PPO fine-tune
-    print(f"[step 4/4] fine-tuning PPO for {args.total_timesteps} timesteps...")
+    # Step 3: PPO fine-tune.
+    print(f"[step 3/3] fine-tuning PPO for {args.total_timesteps} timesteps...")
     ppo.learn(total_timesteps=args.total_timesteps, progress_bar=False)
 
     ppo.save(str(out_path))
     print(f"[done] saved PPO model to {out_path}")
+    if tuned_params:
+        meta_path = out_path.with_suffix(".tuned_params.json")
+        import json
+        meta_path.write_text(json.dumps(tuned_params, indent=2))
+        print(f"[done] tuned params -> {meta_path}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,13 @@
+{
+  "id": "S10",
+  "name": "Out-of-distribution batch weight (220 t)",
+  "description": "Safety mask kicks in. Tests envelope clamping with abnormal initial state.",
+  "seed": 1000010,
+  "duration_steps": 480,
+  "difficulty": "hard",
+  "initial_state_overrides": {
+    "current_batch_weight": 220.0,
+    "arc_power_mw": 105.0
+  },
+  "crisis_schedule": []
+}

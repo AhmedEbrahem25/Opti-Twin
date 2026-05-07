@@ -1,0 +1,12 @@
+{
+  "id": "S02",
+  "name": "24-hr TOU mode, no crisis",
+  "description": "Pre-peak shifting. Tests whether the agent reduces arc before 18:00.",
+  "seed": 1000002,
+  "duration_steps": 480,
+  "difficulty": "easy",
+  "initial_state_overrides": {
+    "tou_mode": true
+  },
+  "crisis_schedule": []
+}

@@ -1,0 +1,10 @@
+{
+  "model": "models/ppo/v0.2.1_low-entropy_seed42/opti_twin_ppo.zip",
+  "n_calls": 5000,
+  "p50_ms": 0.8768499992584111,
+  "p95_ms": 1.6858299981322489,
+  "p99_ms": 2.6692100005675523,
+  "max_ms": 90.34560000145575,
+  "mean_ms": 1.01586425998903,
+  "gate_5ms_p99": true
+}

@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   redis:
     image: redis:7-alpine
@@ -40,7 +38,9 @@ services:
       - RL_EPSILON=${RL_EPSILON:-0.5}
       - RL_ZETA=${RL_ZETA:-0.8}
       - MACHINE_TYPE=EAF
-      - MODEL_PATH=/app/models/opti_twin_ppo.zip
+      - MODEL_PATH=${MODEL_PATH:-/app/models/opti_twin_ppo.zip}
+      - FORECASTER_PATH=${FORECASTER_PATH:-/app/models/forecaster/v0.1.0}
+      - ANOMALY_PATH=${ANOMALY_PATH:-/app/models/anomaly/v0.1.0}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - LLM_XAI_MODEL=${LLM_XAI_MODEL:-claude-haiku-4-5-20251001}
     volumes:
@@ -49,6 +49,47 @@ services:
       redis:
         condition: service_healthy
     networks: [opti-twin-network]
+
+  # One-shot trainer. Does NOT auto-start with `docker compose up`; gate behind
+  # the `training` profile so it only runs when explicitly invoked. The
+  # entrypoint is `python -u`, so the command argument is the script path:
+  #
+  #   docker compose --profile training run --rm trainer train_anomaly.py
+  #   docker compose --profile training run --rm trainer train_bc.py \
+  #     --forecaster models/forecaster/v0.1.0 --anomaly models/anomaly/v0.1.0 \
+  #     --out models/bc/v0.2.0/bc_init.pt
+  #   docker compose --profile training run --rm trainer train_ppo.py \
+  #     --bc-init models/bc/v0.2.0/bc_init.pt \
+  #     --forecaster models/forecaster/v0.1.0 --anomaly models/anomaly/v0.1.0 \
+  #     --tune --total-timesteps 300000 \
+  #     --output models/ppo/v1.0.0_demo/opti_twin_ppo.zip
+  #   docker compose --profile training run --rm trainer -m eval.benchmarks
+  #
+  # Reuses the ai_engine image (training deps already in requirements.txt) and
+  # mounts ./ai_engine/data so collected episodes / scalers / preferences
+  # survive container teardown.
+  trainer:
+    build: ./ai_engine
+    image: opti-twin_ai_engine
+    container_name: opti-twin-trainer
+    profiles: ["training"]
+    working_dir: /app
+    environment:
+      - PYTHONUNBUFFERED=1
+      # Trainer doesn't talk to Redis but agent.py imports llm_xai which
+      # touches it lazily; keep the var so accidental imports don't 500.
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    volumes:
+      - ./ai_engine/models:/app/models
+      - ./ai_engine/data:/app/data       # raw + processed parquet + scalers + preferences
+      - ./ai_engine/eval/results:/app/eval/results
+      - ./ai_engine/logs:/app/logs       # tensorboard + colored stdout sinks
+    networks: [opti-twin-network]
+    # Default to launching a shell so `run --rm trainer python ...` works
+    # cleanly. Override with the script you actually want to run.
+    entrypoint: ["python", "-u"]
+    command: ["-c", "print('opti-twin trainer ready -- pass a script as the command argument'); print('e.g. docker compose --profile training run --rm trainer train_ppo.py --help')"]
 
   backend:
     build: ./backend

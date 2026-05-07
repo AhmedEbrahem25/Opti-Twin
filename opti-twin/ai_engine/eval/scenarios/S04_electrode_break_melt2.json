@@ -1,0 +1,12 @@
+{
+  "id": "S04",
+  "name": "Electrode break in MELT_2",
+  "description": "Recovery + production continuity. Tests electrode_consumption response.",
+  "seed": 1000004,
+  "duration_steps": 480,
+  "difficulty": "medium",
+  "initial_state_overrides": {},
+  "crisis_schedule": [
+    {"tick": 150, "type": "electrode_consumption", "magnitude": 0.18}
+  ]
+}

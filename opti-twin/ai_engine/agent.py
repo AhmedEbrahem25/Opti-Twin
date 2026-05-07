@@ -29,6 +29,19 @@ from reward_function import RewardWeights, compute_reward
 from safety import apply_action_mask, clamp_setpoints
 from xai_engine import generate_reason, pick_dominant_component
 
+# Optional M2/M3 — loaded lazily so the agent still works when the trained
+# checkpoints aren't available (e.g. on a fresh checkout before training).
+try:
+    from forecaster.lstm_forecaster import load_forecaster, summarise_for_obs, LOOKBACK as _F_LB
+except ImportError:  # pragma: no cover
+    load_forecaster = None
+    summarise_for_obs = None
+    _F_LB = 30
+try:
+    from anomaly.autoencoder import load_anomaly_detector
+except ImportError:  # pragma: no cover
+    load_anomaly_detector = None
+
 
 @dataclass
 class AIRecommendation:
@@ -54,8 +67,14 @@ class AIRecommendation:
 class OptiTwinAgent:
     """Wraps a trained PPO model OR the scripted fallback policy."""
 
-    def __init__(self, weights: Optional[RewardWeights] = None,
-                 model_path: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        weights: Optional[RewardWeights] = None,
+        model_path: Optional[str] = None,
+        *,
+        forecaster_path: Optional[str] = None,
+        anomaly_path: Optional[str] = None,
+    ) -> None:
         self.weights = weights or RewardWeights()
         self.model: Optional[Any] = None
         if model_path and os.path.exists(model_path) and PPO is not None:
@@ -63,15 +82,94 @@ class OptiTwinAgent:
                 self.model = PPO.load(model_path)
                 _log.info("Loaded PPO model from %s", model_path)
             except Exception as exc:  # pragma: no cover
-                _log.warning("Failed to load PPO model (%s) — using scripted policy", exc)
+                _log.warning("Failed to load PPO model (%s) -- using scripted policy", exc)
                 self.model = None
         else:
-            _log.info("No PPO model found at %s — using scripted fallback policy", model_path)
+            _log.info("No PPO model found at %s -- using scripted fallback policy", model_path)
+
+        # Optional M2/M3 for live obs construction when the PPO is loaded.
+        self._forecaster = None
+        self._anomaly = None
+        self._forecast_window: Optional[np.ndarray] = None
+        self._anomaly_window: Optional[np.ndarray] = None
+        self._cached_forecast_summary: Optional[np.ndarray] = None
+        self._cached_anomaly_score: float = 0.0
+        self._tick_counter = 0
+        self._forecast_refresh_every = 10
+
+        if forecaster_path and load_forecaster is not None and os.path.exists(forecaster_path):
+            try:
+                self._forecaster = load_forecaster(forecaster_path)
+                self._forecast_window = np.zeros((_F_LB, 7), dtype=np.float32)
+                _log.info("Loaded M2 forecaster from %s", forecaster_path)
+            except Exception as exc:  # pragma: no cover
+                _log.warning("M2 load failed (%s) -- proceeding without forecaster", exc)
+
+        if anomaly_path and load_anomaly_detector is not None and os.path.exists(anomaly_path):
+            try:
+                self._anomaly = load_anomaly_detector(anomaly_path)
+                self._anomaly_window = np.zeros(
+                    (self._anomaly.model.channels, self._anomaly.model.window),
+                    dtype=np.float32,
+                )
+                _log.info("Loaded M3 anomaly detector from %s", anomaly_path)
+            except Exception as exc:  # pragma: no cover
+                _log.warning("M3 load failed (%s) -- proceeding without anomaly", exc)
+
+    def _state_to_forecast_features(self, s: Dict[str, Any]) -> np.ndarray:
+        sh = float(s.get("sim_hour", 0.0))
+        rad = 2.0 * np.pi * sh / 24.0
+        return np.array([
+            float(s.get("electricity_price", 1.60)),
+            float(s.get("arc_power_mw", 0.0)),
+            1.0 if s.get("is_peak", False) else 0.0,
+            1.0 if s.get("tou_mode", False) else 0.0,
+            float(np.sin(rad)),
+            float(np.cos(rad)),
+            float(s.get("grid_frequency", 50.0)),
+        ], dtype=np.float32)
+
+    def _state_to_anomaly_channels(self, s: Dict[str, Any]) -> np.ndarray:
+        return np.array([
+            float(s.get("arc_power_mw", 0.0)),
+            float(s.get("furnace_bath_temp", 0.0)),
+            float(s.get("wall_panel_temp", 0.0)),
+            float(s.get("electrode_temp", 0.0)),
+            float(s.get("cooling_water_outlet_temp", 0.0)),
+            float(s.get("power_factor", 0.0)),
+            float(s.get("energy_this_heat_kwh", 0.0)),
+            float(s.get("electrode_consumption_kg", 0.0)),
+            float(s.get("grid_frequency", 50.0)),
+        ], dtype=np.float32)
+
+    def _refresh_model_state(self, state: Dict[str, Any]) -> None:
+        """Update M2/M3 rolling windows and cached outputs from the latest tick."""
+        if self._forecaster is not None and self._forecast_window is not None:
+            self._forecast_window = np.roll(self._forecast_window, -1, axis=0)
+            self._forecast_window[-1] = self._state_to_forecast_features(state)
+            if self._tick_counter % self._forecast_refresh_every == 0:
+                price_q, _ = self._forecaster.predict(self._forecast_window)
+                self._cached_forecast_summary = summarise_for_obs(price_q)
+        if self._anomaly is not None and self._anomaly_window is not None:
+            self._anomaly_window = np.roll(self._anomaly_window, -1, axis=1)
+            self._anomaly_window[:, -1] = self._state_to_anomaly_channels(state)
+            ch_means = self._anomaly.channel_means[:, None]
+            ch_stds = self._anomaly.channel_stds[:, None] + 1e-6
+            normed = (self._anomaly_window - ch_means) / ch_stds
+            self._cached_anomaly_score = self._anomaly.score(normed.astype(np.float32))
+        self._tick_counter += 1
 
     # ------- Public API -------
     def recommend(self, state: Dict[str, Any]) -> AIRecommendation:
+        # Refresh M2/M3 every tick (cheap; M2 is throttled internally).
+        self._refresh_model_state(state)
+
         if self.model is not None:
-            obs = make_obs_vector(state)
+            obs = make_obs_vector(
+                state,
+                forecast_summary=self._cached_forecast_summary,
+                anomaly_score=self._cached_anomaly_score,
+            )
             action, _ = self.model.predict(obs, deterministic=True)
             raw_label = ACTIONS[int(action)]
         else:

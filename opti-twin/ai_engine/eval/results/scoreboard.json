@@ -1,0 +1,537 @@
+{
+  "model": "models/ppo/v0.2.1_low-entropy_seed42/opti_twin_ppo.zip",
+  "n_scenarios": 10,
+  "summary": {
+    "rows": [
+      {
+        "id": "S01",
+        "name": "24-hr nominal, flat tariff, no crisis",
+        "scripted_total": 2034.6,
+        "ppo_total": 1411.17,
+        "delta": -623.43,
+        "ppo_won": false,
+        "ppo_safety_breaches": 0,
+        "ppo_p99_ms": 2.54
+      },
+      {
+        "id": "S02",
+        "name": "24-hr TOU mode, no crisis",
+        "scripted_total": 2255.0,
+        "ppo_total": 1333.46,
+        "delta": -921.54,
+        "ppo_won": false,
+        "ppo_safety_breaches": 0,
+        "ppo_p99_ms": 2.16
+      },
+      {
+        "id": "S03",
+        "name": "Wall overheat at 18:00",
+        "scripted_total": 1901.92,
+        "ppo_total": 1097.83,
+        "delta": -804.09,
+        "ppo_won": false,
+        "ppo_safety_breaches": 1,
+        "ppo_p99_ms": 1.6
+      },
+      {
+        "id": "S04",
+        "name": "Electrode break in MELT_2",
+        "scripted_total": 2110.51,
+        "ppo_total": 1684.27,
+        "delta": -426.24,
+        "ppo_won": false,
+        "ppo_safety_breaches": 0,
+        "ppo_p99_ms": 1.97
+      },
+      {
+        "id": "S05",
+        "name": "Grid Hz dip 49.6",
+        "scripted_total": 1730.83,
+        "ppo_total": 1553.4,
+        "delta": -177.43,
+        "ppo_won": false,
+        "ppo_safety_breaches": 0,
+        "ppo_p99_ms": 2.05
+      },
+      {
+        "id": "S06",
+        "name": "Transformer alarm late shift",
+        "scripted_total": 1846.14,
+        "ppo_total": 1090.21,
+        "delta": -755.94,
+        "ppo_won": false,
+        "ppo_safety_breaches": 1,
+        "ppo_p99_ms": 1.74
+      },
+      {
+        "id": "S07",
+        "name": "PF stuck at 0.74 (cap-bank fault)",
+        "scripted_total": 1716.74,
+        "ppo_total": 1183.62,
+        "delta": -533.11,
+        "ppo_won": false,
+        "ppo_safety_breaches": 0,
+        "ppo_p99_ms": 1.87
+      },
+      {
+        "id": "S08",
+        "name": "Forecast horizon dropout (M2 silent for 5 min)",
+        "scripted_total": 1623.73,
+        "ppo_total": 1174.66,
+        "delta": -449.07,
+        "ppo_won": false,
+        "ppo_safety_breaches": 1,
+        "ppo_p99_ms": 3.08
+      },
+      {
+        "id": "S09",
+        "name": "Multi-crisis (wall+grid in 60 sim-sec)",
+        "scripted_total": 1598.82,
+        "ppo_total": 567.85,
+        "delta": -1030.97,
+        "ppo_won": false,
+        "ppo_safety_breaches": 1,
+        "ppo_p99_ms": 2.4
+      },
+      {
+        "id": "S10",
+        "name": "Out-of-distribution batch weight (220 t)",
+        "scripted_total": 1445.85,
+        "ppo_total": 921.5,
+        "delta": -524.34,
+        "ppo_won": false,
+        "ppo_safety_breaches": 2,
+        "ppo_p99_ms": 2.43
+      }
+    ],
+    "ppo_scenario_wins": 0,
+    "ppo_total_safety_breaches": 6
+  },
+  "scripted": [
+    {
+      "scenario_id": "S01",
+      "scenario_name": "24-hr nominal, flat tariff, no crisis",
+      "mean_reward": 4.238750551748478,
+      "total_reward": 2034.6002648392691,
+      "total_energy_savings_egp": 5517.2999999999865,
+      "quality_steps": 8,
+      "pf_violations": 4,
+      "safety_breaches": 0,
+      "bath_below_floor_ticks": 8,
+      "heats_completed": 3,
+      "final_backlog": 0,
+      "actions": {
+        "RAISE_PF_COMPENSATION": 5,
+        "HOLD_STEADY": 463,
+        "EMERGENCY_COOLING": 12
+      },
+      "latency_ms_p50": 0.5219499980739783,
+      "latency_ms_p99": 3.1989439977041676
+    },
+    {
+      "scenario_id": "S02",
+      "scenario_name": "24-hr TOU mode, no crisis",
+      "mean_reward": 4.697925673144169,
+      "total_reward": 2255.0043231092013,
+      "total_energy_savings_egp": 6034.499999999987,
+      "quality_steps": 8,
+      "pf_violations": 4,
+      "safety_breaches": 0,
+      "bath_below_floor_ticks": 8,
+      "heats_completed": 3,
+      "final_backlog": 0,
+      "actions": {
+        "RAISE_PF_COMPENSATION": 5,
+        "HOLD_STEADY": 463,
+        "EMERGENCY_COOLING": 11,
+        "PRE_PEAK_DROP": 1
+      },
+      "latency_ms_p50": 0.5281499979901128,
+      "latency_ms_p99": 1.378743000786926
+    },
+    {
+      "scenario_id": "S03",
+      "scenario_name": "Wall overheat at 18:00",
+      "mean_reward": 3.9623330242534958,
+      "total_reward": 1901.919851641678,
+      "total_energy_savings_egp": 7284.529999999978,
+      "quality_steps": 8,
+      "pf_violations": 4,
+      "safety_breaches": 0,
+      "bath_below_floor_ticks": 7,
+      "heats_completed": 3,
+      "final_backlog": 0,
+      "actions": {
+        "RAISE_PF_COMPENSATION": 5,
+        "HOLD_STEADY": 427,
+        "EMERGENCY_COOLING": 42,
+        "GRID_RIDE_THROUGH": 5,
+        "TRANSFORMER_DERATE": 1
+      },
+      "latency_ms_p50": 0.51299999904586,
+      "latency_ms_p99": 1.5588239993303432
+    },
+    {
+      "scenario_id": "S04",
+      "scenario_name": "Electrode break in MELT_2",
+      "mean_reward": 4.396903471895466,
+      "total_reward": 2110.5136665098235,
+      "total_energy_savings_egp": 6314.549999999985,
+      "quality_steps": 7,
+      "pf_violations": 4,
+      "safety_breaches": 0,
+      "bath_below_floor_ticks": 7,
+      "heats_completed": 3,
+      "final_backlog": 0,
+      "actions": {
+        "RAISE_PF_COMPENSATION": 5,
+        "HOLD_STEADY": 436,
+        "EMERGENCY_COOLING": 34,
+        "GRID_RIDE_THROUGH": 5
+      },
+      "latency_ms_p50": 0.5279499982862035,
+      "latency_ms_p99": 1.7121889979898686
+    },
+    {
+      "scenario_id": "S05",
+      "scenario_name": "Grid Hz dip 49.6",
+      "mean_reward": 3.605892162954406,
+      "total_reward": 1730.8282382181148,
+      "total_energy_savings_egp": 7152.099999999962,
+      "quality_steps": 8,
+      "pf_violations": 4,
+      "safety_breaches": 0,
+      "bath_below_floor_ticks": 5,
+      "heats_completed": 3,
+      "final_backlog": 0,
+      "actions": {
+        "RAISE_PF_COMPENSATION": 5,
+        "HOLD_STEADY": 422,
+        "REDUCE_ARC_POWER": 2,
+        "GRID_RIDE_THROUGH": 12,
+        "EMERGENCY_COOLING": 37,
+        "TRANSFORMER_DERATE": 2
+      },
+      "latency_ms_p50": 0.5018499996367609,
+      "latency_ms_p99": 1.9303609992857658
+    },
+    {
+      "scenario_id": "S06",
+      "scenario_name": "Transformer alarm late shift",
+      "mean_reward": 3.8461312470345503,
+      "total_reward": 1846.1429985765842,
+      "total_energy_savings_egp": 7362.739999999965,
+      "quality_steps": 8,
+      "pf_violations": 4,
+      "safety_breaches": 0,
+      "bath_below_floor_ticks": 5,
+      "heats_completed": 3,
+      "final_backlog": 0,
+      "actions": {
+        "RAISE_PF_COMPENSATION": 5,
+        "TRANSFORMER_DERATE": 4,
+        "HOLD_STEADY": 421,
+        "EMERGENCY_COOLING": 40,
+        "GRID_RIDE_THROUGH": 10
+      },
+      "latency_ms_p50": 0.5105000018374994,
+      "latency_ms_p99": 1.4319140014413279
+    },
+    {
+      "scenario_id": "S07",
+      "scenario_name": "PF stuck at 0.74 (cap-bank fault)",
+      "mean_reward": 3.5765394305473257,
+      "total_reward": 1716.7389266627163,
+      "total_energy_savings_egp": 6910.63999999997,
+      "quality_steps": 8,
+      "pf_violations": 5,
+      "safety_breaches": 0,
+      "bath_below_floor_ticks": 8,
+      "heats_completed": 3,
+      "final_backlog": 0,
+      "actions": {
+        "RAISE_PF_COMPENSATION": 6,
+        "HOLD_STEADY": 437,
+        "REDUCE_ARC_POWER": 2,
+        "EMERGENCY_COOLING": 34,
+        "TRANSFORMER_DERATE": 1
+      },
+      "latency_ms_p50": 0.4708500000560889,
+      "latency_ms_p99": 1.1534099982964106
+    },
+    {
+      "scenario_id": "S08",
+      "scenario_name": "Forecast horizon dropout (M2 silent for 5 min)",
+      "mean_reward": 3.3827677490938517,
+      "total_reward": 1623.7285195650488,
+      "total_energy_savings_egp": 6915.379999999969,
+      "quality_steps": 9,
+      "pf_violations": 4,
+      "safety_breaches": 0,
+      "bath_below_floor_ticks": 7,
+      "heats_completed": 3,
+      "final_backlog": 0,
+      "actions": {
+        "RAISE_PF_COMPENSATION": 5,
+        "HOLD_STEADY": 432,
+        "REDUCE_ARC_POWER": 2,
+        "EMERGENCY_COOLING": 36,
+        "GRID_RIDE_THROUGH": 5
+      },
+      "latency_ms_p50": 0.47864999942248687,
+      "latency_ms_p99": 1.25523799964867
+    },
+    {
+      "scenario_id": "S09",
+      "scenario_name": "Multi-crisis (wall+grid in 60 sim-sec)",
+      "mean_reward": 3.330874543355761,
+      "total_reward": 1598.8197808107652,
+      "total_energy_savings_egp": 7321.079999999989,
+      "quality_steps": 8,
+      "pf_violations": 4,
+      "safety_breaches": 1,
+      "bath_below_floor_ticks": 7,
+      "heats_completed": 3,
+      "final_backlog": 0,
+      "actions": {
+        "RAISE_PF_COMPENSATION": 5,
+        "HOLD_STEADY": 357,
+        "EMERGENCY_COOLING": 89,
+        "GRID_RIDE_THROUGH": 26,
+        "TRANSFORMER_DERATE": 3
+      },
+      "latency_ms_p50": 0.5604000016319333,
+      "latency_ms_p99": 2.839790998841631
+    },
+    {
+      "scenario_id": "S10",
+      "scenario_name": "Out-of-distribution batch weight (220 t)",
+      "mean_reward": 3.012179927786163,
+      "total_reward": 1445.8463653373583,
+      "total_energy_savings_egp": 6932.939999999961,
+      "quality_steps": 8,
+      "pf_violations": 4,
+      "safety_breaches": 0,
+      "bath_below_floor_ticks": 7,
+      "heats_completed": 3,
+      "final_backlog": 0,
+      "actions": {
+        "RAISE_PF_COMPENSATION": 5,
+        "HOLD_STEADY": 350,
+        "EMERGENCY_COOLING": 100,
+        "GRID_RIDE_THROUGH": 20,
+        "TRANSFORMER_DERATE": 5
+      },
+      "latency_ms_p50": 0.4851499998039799,
+      "latency_ms_p99": 1.2186620016291265
+    }
+  ],
+  "ppo": [
+    {
+      "scenario_id": "S01",
+      "scenario_name": "24-hr nominal, flat tariff, no crisis",
+      "mean_reward": 2.9399395609304375,
+      "total_reward": 1411.17098924661,
+      "total_energy_savings_egp": 7454.4099999999835,
+      "quality_steps": 9,
+      "pf_violations": 480,
+      "safety_breaches": 0,
+      "bath_below_floor_ticks": 8,
+      "heats_completed": 3,
+      "final_backlog": 0,
+      "actions": {
+        "HOLD_STEADY": 455,
+        "REDUCE_ARC_POWER": 15,
+        "EMERGENCY_COOLING": 10
+      },
+      "latency_ms_p50": 0.9194499998557149,
+      "latency_ms_p99": 2.5412970018805883
+    },
+    {
+      "scenario_id": "S02",
+      "scenario_name": "24-hr TOU mode, no crisis",
+      "mean_reward": 2.7780484227653193,
+      "total_reward": 1333.4632429273533,
+      "total_energy_savings_egp": 5912.729999999975,
+      "quality_steps": 8,
+      "pf_violations": 480,
+      "safety_breaches": 0,
+      "bath_below_floor_ticks": 8,
+      "heats_completed": 3,
+      "final_backlog": 0,
+      "actions": {
+        "HOLD_STEADY": 467,
+        "REDUCE_ARC_POWER": 1,
+        "EMERGENCY_COOLING": 12
+      },
+      "latency_ms_p50": 0.9418000008736271,
+      "latency_ms_p99": 2.159548002382507
+    },
+    {
+      "scenario_id": "S03",
+      "scenario_name": "Wall overheat at 18:00",
+      "mean_reward": 2.28713939918189,
+      "total_reward": 1097.8269116073072,
+      "total_energy_savings_egp": 7184.509999999977,
+      "quality_steps": 8,
+      "pf_violations": 480,
+      "safety_breaches": 1,
+      "bath_below_floor_ticks": 7,
+      "heats_completed": 3,
+      "final_backlog": 0,
+      "actions": {
+        "HOLD_STEADY": 431,
+        "EMERGENCY_COOLING": 43,
+        "GRID_RIDE_THROUGH": 5,
+        "TRANSFORMER_DERATE": 1
+      },
+      "latency_ms_p50": 0.797200000306475,
+      "latency_ms_p99": 1.59570299929328
+    },
+    {
+      "scenario_id": "S04",
+      "scenario_name": "Electrode break in MELT_2",
+      "mean_reward": 3.5088937982210857,
+      "total_reward": 1684.269023146121,
+      "total_energy_savings_egp": 6224.499999999986,
+      "quality_steps": 7,
+      "pf_violations": 480,
+      "safety_breaches": 0,
+      "bath_below_floor_ticks": 7,
+      "heats_completed": 3,
+      "final_backlog": 0,
+      "actions": {
+        "HOLD_STEADY": 440,
+        "EMERGENCY_COOLING": 35,
+        "GRID_RIDE_THROUGH": 5
+      },
+      "latency_ms_p50": 0.8081500018306542,
+      "latency_ms_p99": 1.966277998799341
+    },
+    {
+      "scenario_id": "S05",
+      "scenario_name": "Grid Hz dip 49.6",
+      "mean_reward": 3.236247282349754,
+      "total_reward": 1553.398695527882,
+      "total_energy_savings_egp": 6618.359999999966,
+      "quality_steps": 8,
+      "pf_violations": 480,
+      "safety_breaches": 0,
+      "bath_below_floor_ticks": 5,
+      "heats_completed": 3,
+      "final_backlog": 0,
+      "actions": {
+        "HOLD_STEADY": 439,
+        "GRID_RIDE_THROUGH": 12,
+        "EMERGENCY_COOLING": 28,
+        "TRANSFORMER_DERATE": 1
+      },
+      "latency_ms_p50": 0.866899999891757,
+      "latency_ms_p99": 2.045047998763035
+    },
+    {
+      "scenario_id": "S06",
+      "scenario_name": "Transformer alarm late shift",
+      "mean_reward": 2.271263452643899,
+      "total_reward": 1090.2064572690715,
+      "total_energy_savings_egp": 7347.799999999966,
+      "quality_steps": 8,
+      "pf_violations": 480,
+      "safety_breaches": 1,
+      "bath_below_floor_ticks": 5,
+      "heats_completed": 3,
+      "final_backlog": 0,
+      "actions": {
+        "HOLD_STEADY": 425,
+        "TRANSFORMER_DERATE": 4,
+        "EMERGENCY_COOLING": 41,
+        "GRID_RIDE_THROUGH": 10
+      },
+      "latency_ms_p50": 0.8241000014095334,
+      "latency_ms_p99": 1.7440119986713367
+    },
+    {
+      "scenario_id": "S07",
+      "scenario_name": "PF stuck at 0.74 (cap-bank fault)",
+      "mean_reward": 2.4658833845329355,
+      "total_reward": 1183.624024575809,
+      "total_energy_savings_egp": 5683.999999999975,
+      "quality_steps": 8,
+      "pf_violations": 480,
+      "safety_breaches": 0,
+      "bath_below_floor_ticks": 8,
+      "heats_completed": 3,
+      "final_backlog": 0,
+      "actions": {
+        "HOLD_STEADY": 445,
+        "EMERGENCY_COOLING": 34,
+        "TRANSFORMER_DERATE": 1
+      },
+      "latency_ms_p50": 0.8947000023908913,
+      "latency_ms_p99": 1.8723129981663067
+    },
+    {
+      "scenario_id": "S08",
+      "scenario_name": "Forecast horizon dropout (M2 silent for 5 min)",
+      "mean_reward": 2.4472081543148136,
+      "total_reward": 1174.6599140711105,
+      "total_energy_savings_egp": 5895.679999999974,
+      "quality_steps": 7,
+      "pf_violations": 480,
+      "safety_breaches": 1,
+      "bath_below_floor_ticks": 7,
+      "heats_completed": 3,
+      "final_backlog": 0,
+      "actions": {
+        "HOLD_STEADY": 434,
+        "EMERGENCY_COOLING": 42,
+        "GRID_RIDE_THROUGH": 3,
+        "TRANSFORMER_DERATE": 1
+      },
+      "latency_ms_p50": 0.8316000021295622,
+      "latency_ms_p99": 3.0753319996074295
+    },
+    {
+      "scenario_id": "S09",
+      "scenario_name": "Multi-crisis (wall+grid in 60 sim-sec)",
+      "mean_reward": 1.1830294041360967,
+      "total_reward": 567.8541139853264,
+      "total_energy_savings_egp": 7307.759999999989,
+      "quality_steps": 8,
+      "pf_violations": 480,
+      "safety_breaches": 1,
+      "bath_below_floor_ticks": 7,
+      "heats_completed": 3,
+      "final_backlog": 0,
+      "actions": {
+        "HOLD_STEADY": 361,
+        "EMERGENCY_COOLING": 90,
+        "GRID_RIDE_THROUGH": 26,
+        "TRANSFORMER_DERATE": 3
+      },
+      "latency_ms_p50": 0.8694500011188211,
+      "latency_ms_p99": 2.404842999676471
+    },
+    {
+      "scenario_id": "S10",
+      "scenario_name": "Out-of-distribution batch weight (220 t)",
+      "mean_reward": 1.919799093960439,
+      "total_reward": 921.5035651010107,
+      "total_energy_savings_egp": 6914.599999999961,
+      "quality_steps": 8,
+      "pf_violations": 480,
+      "safety_breaches": 2,
+      "bath_below_floor_ticks": 7,
+      "heats_completed": 3,
+      "final_backlog": 0,
+      "actions": {
+        "HOLD_STEADY": 359,
+        "EMERGENCY_COOLING": 101,
+        "GRID_RIDE_THROUGH": 15,
+        "TRANSFORMER_DERATE": 5
+      },
+      "latency_ms_p50": 0.8237500005634502,
+      "latency_ms_p99": 2.4331219977466363
+    }
+  ]
+}

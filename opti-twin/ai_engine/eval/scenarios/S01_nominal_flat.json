@@ -1,0 +1,12 @@
+{
+  "id": "S01",
+  "name": "24-hr nominal, flat tariff, no crisis",
+  "description": "Baseline efficiency. Scripted should easily pace 5 heats; PPO should show energy savings.",
+  "seed": 1000001,
+  "duration_steps": 480,
+  "difficulty": "easy",
+  "initial_state_overrides": {
+    "tou_mode": false
+  },
+  "crisis_schedule": []
+}

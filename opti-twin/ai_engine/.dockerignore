@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.log
+
+# Bake-time excludes -- these are produced by training and should be mounted
+# from the host (or generated inside the trainer container), not baked into
+# the image. Keeps the runtime image small.
+data/
+eval/results/
+logs/
+
+# Keep .gitkeep + the active demo zip but skip ad-hoc parked checkpoints.
+models/*.untrained_demo
+models/*.zip.bak

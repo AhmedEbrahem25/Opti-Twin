@@ -1,0 +1,14 @@
+{
+  "id": "S03",
+  "name": "Wall overheat at 18:00",
+  "description": "Beta-override -- stress penalty must dominate energy savings.",
+  "seed": 1000003,
+  "duration_steps": 480,
+  "difficulty": "medium",
+  "initial_state_overrides": {
+    "tou_mode": true
+  },
+  "crisis_schedule": [
+    {"tick": 100, "type": "wall_overheat", "magnitude": 60.0}
+  ]
+}

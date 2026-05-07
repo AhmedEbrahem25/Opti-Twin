@@ -1,0 +1,12 @@
+{
+  "id": "S06",
+  "name": "Transformer alarm late shift",
+  "description": "Derate + reschedule. The Nov 2024 failure-pattern scenario.",
+  "seed": 1000006,
+  "duration_steps": 480,
+  "difficulty": "medium",
+  "initial_state_overrides": {},
+  "crisis_schedule": [
+    {"tick": 320, "type": "transformer_alarm", "magnitude": 1.0}
+  ]
+}

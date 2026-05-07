@@ -1,0 +1,12 @@
+{
+  "id": "S08",
+  "name": "Forecast horizon dropout (M2 silent for 5 min)",
+  "description": "Uncertainty handling. Forecast cache stale; agent should fall back gracefully.",
+  "seed": 1000008,
+  "duration_steps": 480,
+  "difficulty": "medium",
+  "initial_state_overrides": {},
+  "crisis_schedule": [
+    {"tick": 100, "type": "forecast_dropout", "magnitude": 100}
+  ]
+}

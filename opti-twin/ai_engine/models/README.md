@@ -2,25 +2,59 @@
 
 Mounted at `/app/models` inside the `ai_engine` container.
 
-## Demo state (2026-05-03)
+## Layout (planing-v2.md §15.1)
 
-The trained PPO checkpoint at `opti_twin_ppo.zip.untrained_demo` is parked, not active. The eval harness (`eval_agent.py`) showed it underperforming the scripted policy on the seeded eval set (mean reward 285 vs 843).
+```
+models/
+├── ppo/                          # PPO policies (M1)
+│   ├── v0.1.0_bc-init_seed42/    # 32-D obs, BC-init only
+│   ├── v0.2.0_full-stack_seed42/ # 39-D obs, M2/M3 active
+│   ├── v0.2.1_low-entropy_seed42/# tuning experiment
+│   └── v1.0.0_demo/              # final demo build (Optuna-tuned, 300K steps)
+├── forecaster/                   # M2 LSTM
+│   └── v0.1.0/                   # forecaster.pt + feature_columns.json
+├── anomaly/                      # M3 autoencoder
+│   └── v0.1.0/                   # autoencoder.pt + threshold.json
+├── bc/                           # M4 warm-start
+│   ├── v0.1.0/                   # 32-D legacy
+│   └── v0.2.0/                   # 39-D current
+├── reward_model/                 # M5 preference model
+│   └── v0.1.0/                   # reward_model.pt + meta.json
+└── opti_twin_ppo.zip             # symlink/copy: agent_service loads this path
+```
 
-**Root cause:** the training env's reward function has no production-rate signal — `production_delay_penalty` keys off `production_backlog`, which the env's `step()` never increments. PPO exploited this by hammering `TRANSFORMER_DERATE` (which caps arc at 75 MW) for cheap energy savings, at the cost of crisis-handling and PF-correction coverage.
+## Active demo state
 
-**Demo behaviour:** with no `opti_twin_ppo.zip` present, `OptiTwinAgent` (`agent.py:65`) logs *"No PPO model found ... using scripted fallback policy"* and runs the deterministic scripted decision tree — which is what every prior demo iteration ran on. Safety mask + LLM XAI both layer on top regardless of which policy underlies them.
+`agent_service.py` loads `MODEL_PATH` (default `/app/models/opti_twin_ppo.zip`).
+For the demo:
+1. Copy or symlink `models/ppo/v1.0.0_demo/opti_twin_ppo.zip` to `models/opti_twin_ppo.zip`.
+2. Set `FORECASTER_PATH=/app/models/forecaster/v0.1.0` (default).
+3. Set `ANOMALY_PATH=/app/models/anomaly/v0.1.0` (default).
 
-## To re-enable a trained PPO
+If `opti_twin_ppo.zip` is absent, the agent logs *"using scripted fallback policy"*
+and runs the deterministic scripted decision tree -- safety mask + LLM XAI still
+layer on top. This is the fallback in planing-v2.md §17 risk MR1.
 
-1. Fix the env reward signal to penalise low arc when the heat needs to progress and when no crisis is active. See `environment.py:_RELEVANT_STATE_KEYS` plus `reward_function.compute_reward`.
-2. Re-run `python train_ppo.py` (inside `docker compose run --rm --no-deps ai_engine`).
-3. Re-run `python eval_agent.py` and confirm the gate prints `PPO ≥ scripted`.
-4. Move the file back: rename `opti_twin_ppo.zip.untrained_demo` (or the freshly-trained zip) to `opti_twin_ppo.zip`.
+## Demo gates
 
-## Files in this directory
+A new PPO checkpoint can replace the demo only if `eval/check_gates.py` exits
+zero on the scoreboard JSON. Gates per planing-v2.md §12.4:
 
-| File | Description |
-|---|---|
-| `opti_twin_ppo.zip` | Active PPO checkpoint loaded at container startup. Absent in demo state. |
-| `opti_twin_ppo.zip.untrained_demo` | Parked checkpoint from the 2026-05-03 200K-step run; underperforms scripted. |
-| `.gitkeep` | Keeps the directory under version control. |
+1. PPO wins >= 7 of 10 scenarios.
+2. Zero PPO safety breaches across the scoreboard.
+3. PPO total reward not negative on any scenario.
+4. p99 inference latency < 5 ms (`python -m eval.latency`).
+
+## Model versioning rules
+
+- `current` should be a copy or symlink, never the canonical artefact location.
+- Each checkpoint dir contains `model_card.md`, `metrics.json` (the relevant
+  scoreboard slice), and `tuned_params.json` (when Optuna was used).
+- Files larger than 100 MB are not tracked in git -- see `.gitignore`.
+
+## Phase 0 fix history
+
+- 2026-05-07 -- env `production_backlog` accumulator wired to arc-power-driven
+  heat progress; per-step `production_delay_penalty` coefficient rescaled
+  500.0 -> 5.0 to match the realistic backlog amplitude. See
+  `reward_function.py` and `environment.py` for details.

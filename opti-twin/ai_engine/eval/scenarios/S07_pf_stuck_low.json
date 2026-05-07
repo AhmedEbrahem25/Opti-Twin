@@ -1,0 +1,12 @@
+{
+  "id": "S07",
+  "name": "PF stuck at 0.74 (cap-bank fault)",
+  "description": "M5 reward shifts toward PF. Tests whether RAISE_PF_COMPENSATION fires repeatedly.",
+  "seed": 1000007,
+  "duration_steps": 480,
+  "difficulty": "medium",
+  "initial_state_overrides": {
+    "power_factor": 0.74
+  },
+  "crisis_schedule": []
+}

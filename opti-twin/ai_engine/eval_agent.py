@@ -69,8 +69,9 @@ def run_one_episode(env: OptiTwinEAFEnv, agent: OptiTwinAgent, seed: int) -> Tup
     return total, actions, crisis
 
 
-def evaluate(label: str, agent: OptiTwinAgent, episodes: int, base_seed: int) -> Dict:
-    env = OptiTwinEAFEnv()
+def evaluate(label: str, agent: OptiTwinAgent, episodes: int, base_seed: int,
+             *, forecaster=None, anomaly_detector=None) -> Dict:
+    env = OptiTwinEAFEnv(forecaster=forecaster, anomaly_detector=anomaly_detector)
     rewards: List[float] = []
     actions: Counter = Counter()
     crisis: Counter = Counter()
@@ -112,19 +113,34 @@ def main() -> None:
     p.add_argument("--episodes", type=int, default=100)
     p.add_argument("--model", default=str(HERE / "models" / "opti_twin_ppo.zip"))
     p.add_argument("--seed", type=int, default=1000)
+    p.add_argument("--forecaster", default=None,
+                   help="Path to M2 forecaster directory (matches training conditions)")
+    p.add_argument("--anomaly", default=None,
+                   help="Path to M3 anomaly detector directory (matches training conditions)")
     args = p.parse_args()
+
+    forecaster = None
+    anomaly_det = None
+    if args.forecaster:
+        from forecaster.lstm_forecaster import load_forecaster
+        forecaster = load_forecaster(args.forecaster)
+    if args.anomaly:
+        from anomaly.autoencoder import load_anomaly_detector
+        anomaly_det = load_anomaly_detector(args.anomaly)
 
     print(f"[eval] {args.episodes} episodes  base_seed={args.seed}")
 
     print("[eval] running scripted-policy baseline...")
     scripted = OptiTwinAgent(model_path=None)  # forces fallback
-    scr_results = evaluate("scripted", scripted, args.episodes, args.seed)
+    scr_results = evaluate("scripted", scripted, args.episodes, args.seed,
+                           forecaster=forecaster, anomaly_detector=anomaly_det)
 
     print(f"[eval] running PPO from {args.model}...")
     ppo_agent = OptiTwinAgent(model_path=args.model)
     if ppo_agent.model is None:
         print(f"[eval] WARNING: PPO model not loaded; both columns will be scripted.")
-    ppo_results = evaluate("ppo", ppo_agent, args.episodes, args.seed)
+    ppo_results = evaluate("ppo", ppo_agent, args.episodes, args.seed,
+                           forecaster=forecaster, anomaly_detector=anomaly_det)
 
     print()
     print("=" * 78)
@@ -144,9 +160,9 @@ def main() -> None:
     print("=" * 78)
     delta = ppo_results['mean_reward'] - scr_results['mean_reward']
     if ppo_results['mean_reward'] >= scr_results['mean_reward']:
-        print(f"[gate] PPO ≥ scripted by {delta:+.2f} — OK to ship")
+        print(f"[gate] PPO >= scripted by {delta:+.2f} -- OK to ship")
     else:
-        print(f"[gate] PPO < scripted by {delta:+.2f} — fall back to scripted policy for demo")
+        print(f"[gate] PPO < scripted by {delta:+.2f} -- fall back to scripted policy for demo")
 
 
 if __name__ == "__main__":

@@ -73,9 +73,13 @@ def compute_reward(
         + max(0.0, el_t - 2800.0) * 0.05
     )
 
-    # Production delay — backlog at fixed cost
+    # Production delay — backlog at per-step opportunity cost.
+    # The original 500.0 coefficient was paired with a stuck backlog=0 (env bug);
+    # at the realistic backlog amplitude (1–5 heats), it dominated every other
+    # signal at ~10⁶ per episode. 5.0 keeps this term in the same order of
+    # magnitude as energy_savings/quality so PPO has gradient on every objective.
     backlog = int(state.get("production_backlog", 0))
-    rc.production_delay_penalty = backlog * 500.0
+    rc.production_delay_penalty = backlog * 5.0
 
     # Quality — bath temperature target window
     bath = float(state.get("furnace_bath_temp", 0.0))

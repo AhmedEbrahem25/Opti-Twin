@@ -25,9 +25,11 @@ from environment import update_forecast_cache
 from llm_xai import LLMXAIWorker, XAIJob, excerpt_state
 from reward_function import RewardWeights
 
-REDIS_HOST  = os.getenv("REDIS_HOST", "redis")
-REDIS_PORT  = int(os.getenv("REDIS_PORT", "6379"))
-MODEL_PATH  = os.getenv("MODEL_PATH", "/app/models/opti_twin_ppo.zip")
+REDIS_HOST       = os.getenv("REDIS_HOST", "redis")
+REDIS_PORT       = int(os.getenv("REDIS_PORT", "6379"))
+MODEL_PATH       = os.getenv("MODEL_PATH", "/app/models/opti_twin_ppo.zip")
+FORECASTER_PATH  = os.getenv("FORECASTER_PATH", "/app/models/forecaster/v0.1.0")
+ANOMALY_PATH     = os.getenv("ANOMALY_PATH", "/app/models/anomaly/v0.1.0")
 
 log: Any = None  # set after Redis connect in main()
 
@@ -238,7 +240,12 @@ def main() -> None:
     pre_log.info("Opti-Twin AI engine starting...")
 
     weights = make_weights_from_env()
-    agent   = OptiTwinAgent(weights=weights, model_path=MODEL_PATH)
+    agent = OptiTwinAgent(
+        weights=weights,
+        model_path=MODEL_PATH,
+        forecaster_path=FORECASTER_PATH,
+        anomaly_path=ANOMALY_PATH,
+    )
 
     # Wait for Redis
     r: redis.Redis | None = None

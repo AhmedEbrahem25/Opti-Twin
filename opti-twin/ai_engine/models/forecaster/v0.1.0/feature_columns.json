@@ -1,0 +1,42 @@
+{
+  "feature_columns": [
+    "electricity_price",
+    "arc_power_mw",
+    "is_peak",
+    "tou_mode",
+    "sim_hour_sin",
+    "sim_hour_cos",
+    "grid_frequency"
+  ],
+  "feature_means": [
+    1.406907320022583,
+    63.46540069580078,
+    0.15916000306606293,
+    1.0,
+    0.013575688935816288,
+    -0.010462935082614422,
+    49.99265670776367
+  ],
+  "feature_stds": [
+    0.4755842089653015,
+    8.82352066040039,
+    0.36583399772644043,
+    9.999999974752427e-07,
+    0.703300952911377,
+    0.7106877565383911,
+    0.07869496941566467
+  ],
+  "input_dim": 7,
+  "hidden": 128,
+  "horizon": 60,
+  "n_price_outputs": 6,
+  "quantiles": [
+    0.05,
+    0.25,
+    0.5,
+    0.75,
+    0.95
+  ],
+  "price_target": "electricity_price",
+  "load_target": "arc_power_mw"
+}
