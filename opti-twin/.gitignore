@@ -22,3 +22,5 @@ logs/
 # except a single demo-pinned one.
 ai_engine/models/*.zip
 !ai_engine/models/opti_twin_ppo.zip
+
+data/meili/
