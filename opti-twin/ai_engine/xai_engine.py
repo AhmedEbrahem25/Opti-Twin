@@ -61,6 +61,23 @@ TEMPLATES = {
         "en": "Price forecast shows spike to {forecast_max:.2f} EGP/kWh in next 2h. Pre-emptively dropping arc {progress:.0f}% into heat. Anticipated savings: {savings:.0f} EGP/hr.",
         "ar": "توقعات الأسعار تظهر ارتفاعاً إلى {forecast_max:.2f} ج.م/كيلوواط ساعة خلال ساعتين. تخفيض استباقي للقوس بنسبة {progress:.0f}%. المدخرات المتوقعة: {savings:.0f} ج.م/ساعة.",
     },
+    # ── Flat-tariff / predictive-maintenance templates ─────────────────────────
+    ("REDUCE_ARC_POWER", "electrode_wear"): {
+        "en": "Electrode consumption rate elevated ({el_rate:.3f} kg/min, normal <0.05 kg/min). Flat tariff — no load-shift value. Reducing arc power to conserve electrode and reduce wear-induced downtime risk.",
+        "ar": "معدل استهلاك الإلكترود مرتفع ({el_rate:.3f} كغ/دقيقة، الطبيعي <0.05 كغ/دقيقة). التعريفة ثابتة — لا قيمة لنقل الحمل. تقليل القدرة للحفاظ على الإلكترود وتقليل مخاطر التوقف.",
+    },
+    ("EMERGENCY_COOLING", "wall_temp_trend"): {
+        "en": "Wall temperature trending upward ({wall_trend:.1f}°C/step over last 15s, current {wall:.0f}°C). Activating preventive cooling before critical threshold (250°C). Flat tariff — equipment protection is primary objective.",
+        "ar": "درجة حرارة الجدار في ارتفاع ({wall_trend:.1f}°م/خطوة خلال 15 ثانية، الحالية {wall:.0f}°م). تفعيل التبريد الوقائي قبل العتبة الحرجة (250°م). التعريفة ثابتة — حماية المعدات هي الهدف الأساسي.",
+    },
+    ("RAISE_PF_COMPENSATION", "pf_optimization"): {
+        "en": "Power factor at {pf:.3f} under flat tariff ({price:.2f} EGP/kWh). Proactive compensation avoids EgyptERA penalty and maintains transmission efficiency. Estimated savings: {savings:.0f} EGP/hr.",
+        "ar": "معامل القدرة {pf:.3f} في ظل التعريفة الثابتة ({price:.2f} ج.م/كيلوواط ساعة). التعويض الاستباقي يتفادى غرامة الهيئة المصرية ويحافظ على كفاءة النقل. مدخرات تقديرية: {savings:.0f} ج.م/ساعة.",
+    },
+    ("HOLD_STEADY", "production_optimal"): {
+        "en": "All parameters within optimal range. Bath {bath:.0f}°C on track for tap target. Flat tariff ({price:.2f} EGP/kWh) — no load-shift advantage. PF {pf:.2f} within bounds. Maintaining current arc power for maximum throughput.",
+        "ar": "جميع المعاملات ضمن النطاق الأمثل. الحوض {bath:.0f}°م في المسار الصحيح لهدف الصبة. التعريفة ثابتة ({price:.2f} ج.م/كيلوواط ساعة) — لا ميزة لنقل الحمل. معامل القدرة {pf:.2f} ضمن الحدود. الحفاظ على قدرة القوس الحالية لتحقيق أقصى إنتاجية.",
+    },
 }
 
 
@@ -94,6 +111,9 @@ def generate_reason(
         "dr_payment": float(state.get("dr_payment_egp", 0.0)),
         "net": float(state.get("dr_net_egp", 0.0)),
         "forecast_max": float(state.get("forecast_max_price", 1.60)),
+        # Flat-tariff / predictive-maintenance extras
+        "el_rate": float(state.get("electrode_consumption_kg", 0.0)),
+        "wall_trend": float(state.get("wall_temp_trend_c_per_step", 0.0)),
     }
     return (
         template["en"].format(**fmt_args),
@@ -108,6 +128,32 @@ def pick_dominant_component(reward_components: Dict[str, float]) -> str:
         "pf_penalty": reward_components.get("pf_penalty", 0.0),
         "machine_stress": reward_components.get("machine_stress_penalty", 0.0),
         "production_delay": reward_components.get("production_delay_penalty", 0.0),
+        "electrode_wear": reward_components.get("electrode_waste", 0.0),
         "stable": 0.001,  # ensure fallback
     }
     return max(candidates, key=lambda k: abs(candidates[k]))
+
+
+def pick_dominant_for_action(action_label: str, state: Dict, reward_components: Dict[str, float]) -> str:
+    """Context-aware dominant reason picker that handles flat-tariff signals."""
+    tou_mode = state.get("tou_mode", False)
+
+    # Flat-tariff-specific overrides: when TOU is off, map action triggers to
+    # the correct template keys so bilingual XAI strings are accurate.
+    if not tou_mode:
+        el_rate = float(state.get("electrode_consumption_kg", 0.0))
+        wall_trend = float(state.get("wall_temp_trend_c_per_step", 0.0))
+        wall = float(state.get("wall_panel_temp", 0.0))
+        pf = float(state.get("power_factor", 1.0))
+        arc_p = float(state.get("arc_power_mw", 0.0))
+
+        if action_label == "REDUCE_ARC_POWER" and el_rate > 0.075:
+            return "electrode_wear"
+        if action_label == "EMERGENCY_COOLING" and 150.0 <= wall < 250.0 and wall_trend > 1.0:
+            return "wall_temp_trend"
+        if action_label == "RAISE_PF_COMPENSATION" and pf < 0.93:
+            return "pf_optimization"
+        if action_label == "HOLD_STEADY":
+            return "production_optimal"
+
+    return pick_dominant_component(reward_components)

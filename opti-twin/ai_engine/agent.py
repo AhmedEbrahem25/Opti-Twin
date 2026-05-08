@@ -27,7 +27,7 @@ except ImportError:  # pragma: no cover
 from environment import ACTIONS, _get_forecast_prices, make_obs_vector
 from reward_function import RewardWeights, compute_reward
 from safety import apply_action_mask, clamp_setpoints
-from xai_engine import generate_reason, pick_dominant_component
+from xai_engine import generate_reason, pick_dominant_component, pick_dominant_for_action
 
 
 @dataclass
@@ -116,18 +116,37 @@ class OptiTwinAgent:
         if pf < 0.92 and arc_p * 1000.0 > 500.0:
             return "RAISE_PF_COMPENSATION"
 
-        if state.get("is_peak", False) and arc_p > 70.0:
-            return "REDUCE_ARC_POWER"
+        tou_mode = state.get("tou_mode", False)
 
-        # Dynamic pricing pre-peak detection: use forecast if available
-        forecast_prices = _get_forecast_prices(4)  # next 2h
-        current_price = float(state.get("electricity_price", 1.60))
-        price_spike_ahead = any(p > current_price * 1.4 for p in forecast_prices)
-        if price_spike_ahead and arc_p > 70.0 and not state.get("is_peak", False):
-            return "PRE_PEAK_DROP"
+        # ── Flat-tariff production & maintenance rules (rules 5–7 replacement) ──
+        # Only active when not in TOU/dynamic mode; safety rules above still apply.
+        if not tou_mode:
+            # Electrode conservation: elevated wear rate → reduce arc power
+            el_rate = float(state.get("electrode_consumption_kg", 0.0))  # kg/min field
+            if el_rate > 0.075:
+                return "REDUCE_ARC_POWER"
 
-        # Fallback: TOU mode + within 30 sim-min of 18:00
-        if state.get("tou_mode", False):
+            # Preventive wall cooling: rising trend in pre-critical range
+            wall_trend = float(state.get("wall_temp_trend_c_per_step", 0.0))
+            if 180.0 <= wall <= 200.0 and wall_trend > 1.5:
+                return "EMERGENCY_COOLING"
+
+            # Proactive PF correction: earlier threshold under flat tariff
+            if pf < 0.93 and arc_p > 50.0:
+                return "RAISE_PF_COMPENSATION"
+
+        # ── TOU / dynamic-pricing rules (rules 5–7, unchanged) ──────────────────
+        if tou_mode:
+            if state.get("is_peak", False) and arc_p > 70.0:
+                return "REDUCE_ARC_POWER"
+
+            # Dynamic pricing pre-peak detection: use forecast if available
+            forecast_prices = _get_forecast_prices(4)  # next 2h
+            current_price = float(state.get("electricity_price", 1.60))
+            price_spike_ahead = any(p > current_price * 1.4 for p in forecast_prices)
+            if price_spike_ahead and arc_p > 70.0 and not state.get("is_peak", False):
+                return "PRE_PEAK_DROP"
+
             sim_hour = float(state.get("sim_hour", 0.0))
             if 17.5 <= sim_hour < 18.0 and arc_p > 70.0:
                 return "PRE_PEAK_DROP"
@@ -167,7 +186,7 @@ class OptiTwinAgent:
         # Reward components for transparency
         rc = compute_reward(state, self.weights, baseline_arc_power_mw=baseline)
         rc_dict = rc.as_dict()
-        dominant = pick_dominant_component(rc_dict)
+        dominant = pick_dominant_for_action(label, state, rc_dict)
         reason_en, reason_ar = generate_reason(label, state, rc_dict, dominant)
 
         # KPI estimates

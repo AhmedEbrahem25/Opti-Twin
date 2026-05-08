@@ -23,6 +23,7 @@ import logger as _logger_mod
 from agent import OptiTwinAgent
 from environment import update_forecast_cache
 from llm_xai import LLMXAIWorker, XAIJob, excerpt_state
+from predictive_maintenance import PredictiveMaintenanceEngine
 from reward_function import RewardWeights
 
 REDIS_HOST  = os.getenv("REDIS_HOST", "redis")
@@ -59,6 +60,7 @@ class AIService:
         self._last_action_label: Optional[str] = None
         self.llm_xai = LLMXAIWorker(r)
         self.llm_xai.start()
+        self.pm_engine = PredictiveMaintenanceEngine()
 
     # ── Control channel ───────────────────────────────────────────────────────
 
@@ -208,6 +210,22 @@ class AIService:
                 self.r.publish("ai.recommendation", json.dumps(payload))
             except Exception as exc:
                 log.error("Publish ai.recommendation failed: %s", exc)
+
+            # Predictive maintenance — run every tick, publish when alerts fire
+            try:
+                maint_alerts = self.pm_engine.process(state)
+                if maint_alerts:
+                    self.r.publish(
+                        "maintenance.alerts",
+                        json.dumps([vars(a) for a in maint_alerts]),
+                    )
+                    log.info(
+                        "Maintenance alerts published — count=%d  types=%s",
+                        len(maint_alerts),
+                        [a.alert_type for a in maint_alerts],
+                    )
+            except Exception as exc:
+                log.error("Predictive maintenance processing failed: %s", exc)
 
             if self.ai_enabled and rec.action_label != "HOLD_STEADY":
                 ctrl = {

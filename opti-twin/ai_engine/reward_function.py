@@ -24,6 +24,9 @@ class RewardWeights:
             "equipment_sensitive": cls(0.8, 2.0, 1.0, 0.7, 1.0, 0.5),
             "production_critical": cls(0.8, 0.8, 2.5, 0.7, 0.3, 0.5),
             "quality_focused":     cls(0.8, 0.9, 1.0, 2.0, 0.5, 0.5),
+            # Flat tariff: no time-shift value → prioritise throughput, equipment
+            # health, and quality; energy savings still rewarded at 1.60 EGP/kWh.
+            "flat_tariff":         cls(1.2, 1.5, 2.0, 1.2, 1.0, 0.8),
             "default":             cls(),
         }
         return profiles.get(profile, profiles["default"])
