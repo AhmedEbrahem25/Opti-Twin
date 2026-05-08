@@ -73,7 +73,18 @@
       "PowerShell(Set-Location \"D:\\\\PROJECTS\\\\Opti-Twin\\\\opti-twin\\\\ai_engine\"; python -u -m pytest tests/test_safety.py -v 2>&1 | Select-Object -Last 25; echo \"EXIT=$LASTEXITCODE\")",
       "PowerShell(Set-Location \"D:\\\\PROJECTS\\\\Opti-Twin\\\\opti-twin\\\\ai_engine\"; python -u eval_agent.py --episodes 30 --model \"models/ppo/v1.0.0_demo/opti_twin_ppo.zip\" --forecaster \"models/forecaster/v0.1.0\" --anomaly \"models/anomaly/v0.1.0\" 2>&1 | Select-Object -Last 12; echo \"EXIT=$LASTEXITCODE\")",
       "PowerShell(docker compose *)",
-      "PowerShell(docker compose build *)"
+      "PowerShell(docker compose build *)",
+      "Bash(xargs grep -l \"publish\\\\|subscribe\")",
+      "Bash(npx tsc *)",
+      "Bash(npx typescript *)",
+      "Bash(node_modules/.bin/tsc --noEmit)",
+      "PowerShell(docker compose config *)",
+      "Bash(npm run *)",
+      "Bash(echo \"Exit: $?\")",
+      "Bash(Select-Object -First 30)",
+      "Bash(Format-Table FullName)",
+      "Read(//c//**)",
+      "Read(//f/Projects//**)"
     ]
   }
 }

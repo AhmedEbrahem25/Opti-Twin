@@ -178,6 +178,29 @@ services:
         condition: service_started
     networks: [opti-twin-network]
 
+  # New SaaS-style multi-factory dashboard (frontend-app/). Lives outside the
+  # opti-twin folder, so the build context points up one level. Browser fetches
+  # the backend directly, hence localhost in the NEXT_PUBLIC_* vars.
+  frontend_app:
+    build:
+      context: ../frontend-app
+      dockerfile: Dockerfile
+    container_name: opti-twin-frontend-app
+    ports: ["3001:3000"]
+    environment:
+      - NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+      - NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws/live-feed
+    depends_on:
+      backend:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks: [opti-twin-network]
+
 networks:
   opti-twin-network:
     driver: bridge
