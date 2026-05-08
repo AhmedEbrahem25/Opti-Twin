@@ -61,6 +61,10 @@ export default function EAFStatusCard({ t }: { t?: Telemetry }) {
       <Row k="Charge" v={`${t.current_batch_weight.toFixed(0)} t`} />
       <Row k="O₂ injection" v={`${t.oxygen_injection_m3hr.toFixed(0)} m³/hr`} />
       <Row k="Cooling water" v={`${t.cooling_water_flow_lmin.toFixed(0)} l/min`} />
+      <Row k="Cycle efficiency" v={`${(t.cycle_efficiency_pct ?? 0).toFixed(0)}%`} />
+      <Row k="Thermal stress" v={`${(t.thermal_stress_index ?? 0).toFixed(0)}/100`} />
+      <Row k="Idle today" v={`${(t.idle_minutes_today ?? 0).toFixed(1)} min`} />
+      <Row k="Vibration" v={`${(t.vibration_mm_s ?? 0).toFixed(2)} mm/s`} />
       <Row k="Grid freq." v={`${t.grid_frequency.toFixed(2)} Hz`} />
       <Row k="Tariff" v={t.tariff_class} />
 

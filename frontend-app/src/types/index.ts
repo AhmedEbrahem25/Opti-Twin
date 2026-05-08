@@ -31,7 +31,10 @@ export type RecommendationAction =
   | "EMERGENCY_COOLING"
   | "PRE_PEAK_DROP"
   | "GRID_RIDE_THROUGH"
-  | "TRANSFORMER_DERATE";
+  | "TRANSFORMER_DERATE"
+  | "OPTIMIZE_THROUGHPUT"
+  | "STABILIZE_PROCESS"
+  | "MAINTENANCE_DERATE";
 
 export interface Organization {
   id: string;
@@ -104,6 +107,11 @@ export interface TelemetryPoint {
   vibration?: number;
   flowRate?: number;
   humidity?: number;
+  idleMinutesToday?: number;
+  cycleEfficiencyPct?: number;
+  thermalStressIndex?: number;
+  vibrationMmS?: number;
+  operationalEfficiencyScore?: number;
 }
 
 export interface Recommendation {
@@ -119,6 +127,17 @@ export interface Recommendation {
   dominantReason?: string;
   machineHealth: string;
   productionStatus: string;
+  maintenanceRiskScore?: number;
+  maintenanceRiskLevel?: "NOMINAL" | "WATCH" | "WARNING" | "CRITICAL";
+  maintenanceAlert?: string | null;
+  maintenanceFaultPrediction?: string | null;
+  maintenanceRecommendedAction?: string;
+  maintenanceSafeRecoveryAction?: string | null;
+  maintenanceXaiReason?: string;
+  operationalEfficiencyScore?: number;
+  throughputScore?: number;
+  processStabilityScore?: number;
+  thermalStressIndex?: number;
   confidence: number;
   rewardComponents: {
     energySavingsScore: number;
@@ -161,6 +180,11 @@ export interface KPISnapshot {
   avgEfficiency: number;
   activeAlerts: number;
   uptime: number;
+  maintenanceAlertsToday: number;
+  avgMaintenanceRisk: number;
+  avgOperationalEfficiency: number;
+  avgProcessStability: number;
+  idleMinutesToday: number;
 }
 
 export interface MetricDefinition {

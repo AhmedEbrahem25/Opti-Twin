@@ -59,6 +59,8 @@ class AIService:
         self._consecutive_overrides = 0
         self._rollback_announced = False  # latch so we emit one event per streak
         self._last_action_label: Optional[str] = None
+        self._last_maintenance_level: str = "NOMINAL"
+        self._last_maintenance_alert_ts: float = 0.0
         self.llm_xai = LLMXAIWorker(r)
         self.llm_xai.start()
 
@@ -190,7 +192,56 @@ class AIService:
                 "safety_overridden":             rec.safety_overridden,
                 "safety_reason":                 rec.safety_reason,
                 "raw_action_label":              rec.raw_action_label,
+                "maintenance_risk_score":         rec.maintenance_risk_score,
+                "maintenance_risk_level":         rec.maintenance_risk_level,
+                "maintenance_alert":              rec.maintenance_alert,
+                "maintenance_fault_prediction":   rec.maintenance_fault_prediction,
+                "maintenance_recommended_action": rec.maintenance_recommended_action,
+                "maintenance_safe_recovery_action": rec.maintenance_safe_recovery_action,
+                "maintenance_xai_reason":         rec.maintenance_xai_reason,
+                "maintenance_xai_reason_ar":      rec.maintenance_xai_reason_ar,
+                "operational_efficiency_score":   rec.operational_efficiency_score,
+                "throughput_score":               rec.throughput_score,
+                "process_stability_score":        rec.process_stability_score,
+                "thermal_stress_index":           rec.thermal_stress_index,
             }
+
+            if rec.maintenance_alert:
+                now = time.time()
+                should_publish_alert = (
+                    rec.maintenance_risk_level != self._last_maintenance_level
+                    or now - self._last_maintenance_alert_ts > 60.0
+                )
+                if should_publish_alert:
+                    alert_payload = {
+                        "timestamp": state.get("timestamp"),
+                        "machine_id": state.get("machine_id"),
+                        "alert_type": rec.maintenance_alert,
+                        "risk_score": rec.maintenance_risk_score,
+                        "risk_level": rec.maintenance_risk_level,
+                        "fault_prediction": rec.maintenance_fault_prediction,
+                        "recommended_action": rec.maintenance_recommended_action,
+                        "safe_recovery_action": rec.maintenance_safe_recovery_action,
+                        "xai_reason": rec.maintenance_xai_reason,
+                        "xai_reason_ar": rec.maintenance_xai_reason_ar,
+                        "operational_efficiency_score": rec.operational_efficiency_score,
+                        "process_stability_score": rec.process_stability_score,
+                    }
+                    try:
+                        self.r.publish("ai.maintenance_alert", json.dumps(alert_payload))
+                        log.warning(
+                            "Maintenance alert: %s risk=%.2f level=%s action=%s",
+                            rec.maintenance_alert,
+                            rec.maintenance_risk_score,
+                            rec.maintenance_risk_level,
+                            rec.maintenance_recommended_action,
+                        )
+                    except Exception as exc:
+                        log.error("Publish ai.maintenance_alert failed: %s", exc)
+                    self._last_maintenance_alert_ts = now
+                self._last_maintenance_level = rec.maintenance_risk_level
+            elif self._last_maintenance_level != "NOMINAL":
+                self._last_maintenance_level = rec.maintenance_risk_level
 
             if rec.action_label != "HOLD_STEADY":
                 log.info(

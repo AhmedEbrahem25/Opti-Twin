@@ -35,6 +35,9 @@ REACTIVE_COMP_MAX_MVAR = 30.0
 # Thresholds — keep colocated for readability
 GRID_FREQ_RIDE_THROUGH_HZ = 49.7
 BATH_FREEZE_RISK_C = 1500.0
+MAX_OPTIMIZE_WALL_TEMP_C = 190.0
+MAX_OPTIMIZE_BATH_TEMP_C = 1648.0
+MAX_OPTIMIZE_MAINTENANCE_RISK = 0.35
 
 
 # Reason codes — short stable identifiers; the dashboard / XAI prompt maps
@@ -45,6 +48,8 @@ class MaskReason:
     BATH_FREEZE_RISK = "bath_freeze_risk"
     GRID_FREQ_LOW = "grid_freq_low"
     TRANSFORMER_ALARM = "transformer_alarm"
+    MAINTENANCE_RISK = "maintenance_risk"
+    OPTIMIZATION_LIMIT = "optimization_limit"
 
 
 @dataclass
@@ -83,6 +88,24 @@ def apply_action_mask(label: str, state: Dict[str, Any]) -> MaskResult:
     bath = float(state.get("furnace_bath_temp", 1600.0))
     if bath < BATH_FREEZE_RISK_C and label in ("REDUCE_ARC_POWER", "PRE_PEAK_DROP"):
         return MaskResult("HOLD_STEADY", True, MaskReason.BATH_FREEZE_RISK)
+    if bath < BATH_FREEZE_RISK_C and label == "MAINTENANCE_DERATE":
+        return MaskResult("STABILIZE_PROCESS", True, MaskReason.BATH_FREEZE_RISK)
+
+    maintenance_risk = float(state.get("maintenance_risk_score", 0.0))
+    if maintenance_risk >= 0.65 and label in (
+        "OPTIMIZE_THROUGHPUT",
+        "REDUCE_IDLE_TIME",
+        "STABILIZE_PROCESS",
+    ):
+        return MaskResult("MAINTENANCE_DERATE", True, MaskReason.MAINTENANCE_RISK)
+
+    if label == "OPTIMIZE_THROUGHPUT":
+        if (
+            wall >= MAX_OPTIMIZE_WALL_TEMP_C
+            or bath >= MAX_OPTIMIZE_BATH_TEMP_C
+            or maintenance_risk >= MAX_OPTIMIZE_MAINTENANCE_RISK
+        ):
+            return MaskResult("STABILIZE_PROCESS", True, MaskReason.OPTIMIZATION_LIMIT)
 
     return MaskResult(label, False, MaskReason.NONE)
 

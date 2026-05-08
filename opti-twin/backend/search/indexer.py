@@ -6,6 +6,7 @@ Each emits its own doc type:
 
   ai.recommendation  → decision (when not HOLD_STEADY OR safety_overridden)
   ai.safety_rollback → safety_rollback
+  ai.maintenance_alert → maintenance_alert
   factory.telemetry  → crisis (rising edge of any crisis_flag)
 
 Reuses the existing async pub/sub pattern from `services/redis_broker.py`.
@@ -62,7 +63,13 @@ class Indexer:
         self.broker = broker
         # Per-machine memory of last seen crisis_flags (for rising-edge detection).
         self._prev_flags: Dict[str, Dict[str, bool]] = {}
-        self._counts = {"decision": 0, "crisis": 0, "safety_rollback": 0, "skipped": 0}
+        self._counts = {
+            "decision": 0,
+            "crisis": 0,
+            "safety_rollback": 0,
+            "maintenance_alert": 0,
+            "skipped": 0,
+        }
 
     # ── Subscriber loops ─────────────────────────────────────────────────────
 
@@ -99,6 +106,21 @@ class Indexer:
                 )
             except Exception as exc:  # pragma: no cover
                 log.warning("safety_rollback indexing error: %s", exc)
+
+    async def consume_maintenance_alerts(self) -> None:
+        log.info("Indexer subscribed to ai.maintenance_alert")
+        async for _, data in self.broker.subscribe("ai.maintenance_alert"):
+            try:
+                doc = self._build_maintenance_doc(data)
+                await asyncio.to_thread(self.meili.upsert, [doc])
+                self._counts["maintenance_alert"] += 1
+                log.info(
+                    "indexed maintenance_alert %s (risk=%s, level=%s)",
+                    doc["id"], doc["payload"].get("risk_score"),
+                    doc["payload"].get("risk_level"),
+                )
+            except Exception as exc:  # pragma: no cover
+                log.warning("maintenance_alert indexing error: %s", exc)
 
     async def consume_telemetry_for_crises(self) -> None:
         log.info("Indexer subscribed to factory.telemetry (crisis-edge detection)")
@@ -216,6 +238,40 @@ class Indexer:
             "indexed_at": datetime.now(timezone.utc),
         }
 
+    def _build_maintenance_doc(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        ts = _parse_ts(data.get("timestamp"))
+        machine_id = str(data.get("machine_id") or "EAF_UNKNOWN")
+        risk = float(data.get("risk_score") or 0.0)
+        level = str(data.get("risk_level") or "WARNING")
+        fault = str(data.get("fault_prediction") or "process drift detected")
+        action = str(data.get("recommended_action") or "STABILIZE_AND_INSPECT")
+        severity = "critical" if level == "CRITICAL" else "warning"
+        title_en = f"Predictive maintenance {level.lower()} — risk {risk:.2f}"
+        title_ar = data.get("xai_reason_ar") or title_en
+
+        return {
+            "id": str(ulid.new()),
+            "type": "maintenance_alert",
+            "plant_id": "ezz_ain_sokhna",
+            "line_id": machine_id,
+            "ts": ts,
+            "severity": severity,
+            "title_en": title_en,
+            "title_ar": title_ar,
+            "body_en": data.get("xai_reason") or fault,
+            "body_ar": title_ar,
+            "tags": ["maintenance", "predictive", level.lower(), action.lower()],
+            "payload": {
+                "alert_type": data.get("alert_type"),
+                "risk_score": risk,
+                "risk_level": level,
+                "fault_prediction": fault,
+                "recommended_action": action,
+                "safe_recovery_action": data.get("safe_recovery_action"),
+            },
+            "indexed_at": datetime.now(timezone.utc),
+        }
+
     def _build_crisis_docs(self, data: Dict[str, Any]) -> list:
         flags = data.get("crisis_flags") or {}
         if not flags:
@@ -269,6 +325,7 @@ class Indexer:
         return [
             asyncio.create_task(self.consume_recommendations(), name="idx-recs"),
             asyncio.create_task(self.consume_safety_rollback(), name="idx-rollback"),
+            asyncio.create_task(self.consume_maintenance_alerts(), name="idx-maintenance"),
             asyncio.create_task(self.consume_telemetry_for_crises(), name="idx-crisis"),
         ]
 

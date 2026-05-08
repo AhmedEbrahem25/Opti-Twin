@@ -25,6 +25,12 @@ except ImportError:  # pragma: no cover
     PPO = None
 
 from environment import ACTIONS, _get_forecast_prices, make_obs_vector
+from predictive_maintenance import (
+    MaintenanceAssessment,
+    evaluate_maintenance,
+    should_optimize_flat_production,
+    should_stabilize_process,
+)
 from reward_function import RewardWeights, compute_reward
 from safety import apply_action_mask, clamp_setpoints
 from xai_engine import generate_reason, pick_dominant_component
@@ -59,6 +65,18 @@ class AIRecommendation:
     production_status: str
     reward_components: Dict[str, float]
     dominant_reason: str
+    maintenance_risk_score: float = 0.0
+    maintenance_risk_level: str = "NOMINAL"
+    maintenance_alert: Optional[str] = None
+    maintenance_fault_prediction: Optional[str] = None
+    maintenance_recommended_action: str = "NONE"
+    maintenance_safe_recovery_action: Optional[str] = None
+    maintenance_xai_reason: str = ""
+    maintenance_xai_reason_ar: str = ""
+    operational_efficiency_score: float = 0.0
+    throughput_score: float = 0.0
+    process_stability_score: float = 0.0
+    thermal_stress_index: float = 0.0
     safety_overridden: bool = False
     safety_reason: Optional[str] = None
     raw_action_label: Optional[str] = None  # what the policy emitted before masking
@@ -163,6 +181,16 @@ class OptiTwinAgent:
     def recommend(self, state: Dict[str, Any]) -> AIRecommendation:
         # Refresh M2/M3 every tick (cheap; M2 is throttled internally).
         self._refresh_model_state(state)
+        anomaly_score = self._cached_anomaly_score
+        if self._anomaly is not None:
+            warmup_window = int(getattr(self._anomaly.model, "window", 60))
+            if self._tick_counter < warmup_window:
+                anomaly_score = min(anomaly_score, 0.15)
+        maintenance = evaluate_maintenance(
+            state,
+            anomaly_score=anomaly_score,
+        )
+        policy_state = {**state, **maintenance.to_payload()}
 
         if self.model is not None:
             obs = make_obs_vector(
@@ -173,10 +201,11 @@ class OptiTwinAgent:
             action, _ = self.model.predict(obs, deterministic=True)
             raw_label = ACTIONS[int(action)]
         else:
-            raw_label = self._scripted_policy(state)
+            raw_label = self._scripted_policy(policy_state, maintenance)
 
-        mask = apply_action_mask(raw_label, state)
-        rec = self._build_recommendation(mask.label, state)
+        raw_label = self._supervisory_overlay(policy_state, maintenance, raw_label)
+        mask = apply_action_mask(raw_label, policy_state)
+        rec = self._build_recommendation(mask.label, policy_state, maintenance)
         rec.safety_overridden = mask.overridden
         rec.safety_reason = mask.reason
         rec.raw_action_label = raw_label if mask.overridden else None
@@ -186,7 +215,29 @@ class OptiTwinAgent:
         self.weights = weights
 
     # ------- Scripted policy -------
-    def _scripted_policy(self, state: Dict[str, Any]) -> str:
+    def _supervisory_overlay(
+        self,
+        state: Dict[str, Any],
+        maintenance: MaintenanceAssessment,
+        label: str,
+    ) -> str:
+        """Ensure maintenance and flat-price productivity rules apply to any policy."""
+        if maintenance.risk_level == "CRITICAL":
+            return "MAINTENANCE_DERATE"
+        if should_stabilize_process(state, maintenance) and label in (
+            "HOLD_STEADY",
+            "OPTIMIZE_THROUGHPUT",
+        ):
+            return "STABILIZE_PROCESS"
+        if label == "HOLD_STEADY" and should_optimize_flat_production(state, maintenance):
+            return "OPTIMIZE_THROUGHPUT"
+        return label
+
+    def _scripted_policy(
+        self,
+        state: Dict[str, Any],
+        maintenance: MaintenanceAssessment,
+    ) -> str:
         """Hand-crafted decision tree matching the trained agent's expected behaviour.
 
         Priority order (top wins):
@@ -209,10 +260,19 @@ class OptiTwinAgent:
         if state.get("crisis_flags", {}).get("transformer_alarm"):
             return "TRANSFORMER_DERATE"
 
+        if maintenance.risk_level == "CRITICAL":
+            return "MAINTENANCE_DERATE"
+
+        if should_stabilize_process(state, maintenance):
+            return "STABILIZE_PROCESS"
+
         pf = float(state.get("power_factor", 0.92))
         arc_p = float(state.get("arc_power_mw", 0.0))
         if pf < 0.92 and arc_p * 1000.0 > 500.0:
             return "RAISE_PF_COMPENSATION"
+
+        if should_optimize_flat_production(state, maintenance):
+            return "OPTIMIZE_THROUGHPUT"
 
         if state.get("is_peak", False) and arc_p > 70.0:
             return "REDUCE_ARC_POWER"
@@ -233,7 +293,12 @@ class OptiTwinAgent:
         return "HOLD_STEADY"
 
     # ------- Recommendation builder -------
-    def _build_recommendation(self, label: str, state: Dict[str, Any]) -> AIRecommendation:
+    def _build_recommendation(
+        self,
+        label: str,
+        state: Dict[str, Any],
+        maintenance: MaintenanceAssessment,
+    ) -> AIRecommendation:
         arc_p = float(state.get("arc_power_mw", 90.0))
         baseline = 90.0
 
@@ -254,6 +319,17 @@ class OptiTwinAgent:
             arc_mw = 60.0
         elif label == "TRANSFORMER_DERATE":
             arc_mw = min(75.0, arc_p)
+        elif label == "OPTIMIZE_THROUGHPUT":
+            arc_mw = min(105.0, arc_p + 8.0)
+            cool_lmin = max(float(state.get("cooling_water_flow_lmin", 220.0)), 240.0)
+        elif label == "STABILIZE_PROCESS":
+            cool_lmin = max(float(state.get("cooling_water_flow_lmin", 220.0)), 300.0)
+            if float(state.get("power_factor", 0.92)) < 0.92:
+                comp_mvar = 20.0
+        elif label == "MAINTENANCE_DERATE":
+            arc_mw = max(60.0, arc_p - 15.0) if arc_p > 0.0 else None
+            cool_lmin = max(float(state.get("cooling_water_flow_lmin", 220.0)), 330.0)
+            comp_mvar = 22.0
         # HOLD_STEADY: leave None
 
         arc_mw, cool_lmin, comp_mvar = clamp_setpoints(arc_mw, cool_lmin, comp_mvar)
@@ -263,10 +339,18 @@ class OptiTwinAgent:
             magnitude_pct = (arc_mw - arc_p) / max(1.0, arc_p) * 100.0
 
         # Reward components for transparency
-        rc = compute_reward(state, self.weights, baseline_arc_power_mw=baseline)
+        reward_state = {**state, **maintenance.to_payload()}
+        rc = compute_reward(reward_state, self.weights, baseline_arc_power_mw=baseline)
         rc_dict = rc.as_dict()
         dominant = pick_dominant_component(rc_dict)
-        reason_en, reason_ar = generate_reason(label, state, rc_dict, dominant)
+        if label in ("OPTIMIZE_THROUGHPUT", "STABILIZE_PROCESS", "MAINTENANCE_DERATE"):
+            if label == "OPTIMIZE_THROUGHPUT":
+                dominant = "productivity_bonus"
+            elif label == "STABILIZE_PROCESS":
+                dominant = "process_stability_bonus"
+            else:
+                dominant = "maintenance_risk_penalty"
+        reason_en, reason_ar = generate_reason(label, reward_state, rc_dict, dominant)
 
         # KPI estimates
         delta_kw = max(0.0, baseline - (arc_mw if arc_mw is not None else arc_p)) * 1000.0
@@ -307,6 +391,18 @@ class OptiTwinAgent:
             production_status=prod_status,
             reward_components=rc_dict,
             dominant_reason=dominant,
+            maintenance_risk_score=round(maintenance.risk_score, 3),
+            maintenance_risk_level=maintenance.risk_level,
+            maintenance_alert=maintenance.alert_type,
+            maintenance_fault_prediction=maintenance.fault_prediction,
+            maintenance_recommended_action=maintenance.recommended_action,
+            maintenance_safe_recovery_action=maintenance.safe_recovery_action,
+            maintenance_xai_reason=maintenance.xai_reason_en,
+            maintenance_xai_reason_ar=maintenance.xai_reason_ar,
+            operational_efficiency_score=round(maintenance.operational_efficiency_score, 1),
+            throughput_score=round(maintenance.throughput_score, 1),
+            process_stability_score=round(maintenance.process_stability_score, 1),
+            thermal_stress_index=round(maintenance.thermal_stress_index, 1),
         )
 
 

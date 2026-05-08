@@ -8,6 +8,7 @@ import {
   adaptTelemetry,
   adaptToXAILog,
   crisisFlagsToAlerts,
+  maintenanceAlertToAlert,
 } from "@/lib/adapters";
 import type { WSFrame } from "@/lib/backend-types";
 
@@ -44,14 +45,42 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
           if (parsed.type === "telemetry") {
             const adapted = adaptTelemetry(parsed.data);
             s.addTelemetryPoint(adapted);
-            s.setLiveAlerts(
-              crisisFlagsToAlerts(parsed.data.crisis_flags, adapted.timestamp),
+            const maintenanceAlerts = s.liveAlerts.filter((a) =>
+              a.id.startsWith("maintenance-"),
             );
+            s.setLiveAlerts([
+              ...crisisFlagsToAlerts(parsed.data.crisis_flags, adapted.timestamp),
+              ...maintenanceAlerts,
+            ].slice(0, 20));
           } else if (parsed.type === "recommendation") {
             s.addRecommendation(adaptRecommendation(parsed.data));
             s.addXAILog(adaptToXAILog(parsed.data));
+            if (parsed.data.maintenance_alert) {
+              s.upsertLiveAlert({
+                id: `maintenance-rec-${parsed.data.machine_id ?? "machine"}-${parsed.data.timestamp}`,
+                factoryId: "factory-1",
+                machineId: "factory-1-m1",
+                machineName: "EAF #2 — 185t Danieli",
+                severity:
+                  parsed.data.maintenance_risk_level === "CRITICAL"
+                    ? "critical"
+                    : "warning",
+                title:
+                  parsed.data.maintenance_risk_level === "CRITICAL"
+                    ? "Predictive failure risk"
+                    : "Predictive maintenance warning",
+                message:
+                  parsed.data.maintenance_xai_reason ||
+                  parsed.data.maintenance_fault_prediction ||
+                  "Machine behavior is drifting from the safe operating envelope.",
+                timestamp: parsed.data.timestamp ?? new Date().toISOString(),
+                acknowledged: false,
+              });
+            }
           } else if (parsed.type === "pricing") {
             s.setLivePrice(parsed.data);
+          } else if (parsed.type === "maintenance_alert") {
+            s.upsertLiveAlert(maintenanceAlertToAlert(parsed.data));
           }
         } catch {
           // malformed frame; drop silently

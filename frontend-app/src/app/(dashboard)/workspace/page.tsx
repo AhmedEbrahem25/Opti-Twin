@@ -96,7 +96,7 @@ export default function WorkspacePage() {
 
       {/* KPI Row */}
       <motion.div
-        className="grid grid-cols-2 lg:grid-cols-4 gap-4"
+        className="grid grid-cols-2 lg:grid-cols-6 gap-4"
         initial="initial" animate="animate"
         transition={{ staggerChildren: 0.08 }}
       >
@@ -104,6 +104,8 @@ export default function WorkspacePage() {
         <motion.div {...stagger}><KPICard label="Active Machines" value={kpis.activeMachines} suffix="" trend={5.2} icon={<Activity size={16} />} accentColor="var(--color-cyan)" /></motion.div>
         <motion.div {...stagger}><KPICard label="Energy Saved" value={kpis.totalEnergySavedKwh} suffix=" kWh" trend={12.8} icon={<Zap size={16} />} accentColor="var(--color-success)" /></motion.div>
         <motion.div {...stagger}><KPICard label="Cost Saved Today" value={kpis.totalCostSaved} prefix="" suffix=" EGP" trend={18.3} icon={<DollarSign size={16} />} accentColor="var(--color-accent)" /></motion.div>
+        <motion.div {...stagger}><KPICard label="Ops Efficiency" value={kpis.avgOperationalEfficiency || kpis.avgEfficiency} suffix="%" icon={<TrendingUp size={16} />} accentColor="var(--color-info)" /></motion.div>
+        <motion.div {...stagger}><KPICard label="Maint. Risk" value={kpis.avgMaintenanceRisk * 100} suffix="%" icon={<AlertTriangle size={16} />} accentColor={kpis.avgMaintenanceRisk >= 0.55 ? "var(--color-danger)" : "var(--color-success)"} /></motion.div>
       </motion.div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

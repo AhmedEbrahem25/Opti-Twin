@@ -110,6 +110,7 @@ class AppState:
     kpi: KPICalculator
     last_telemetry: Optional[dict] = None
     last_recommendation: Optional[dict] = None
+    maintenance_alerts: list[dict]
     ws_clients: set[WebSocket]
     price_broker: PriceSignalBroker
     dr_controller: DemandResponseController
@@ -123,6 +124,7 @@ class AppState:
         self.kpi            = KPICalculator()
         self.last_telemetry = None
         self.last_recommendation = None
+        self.maintenance_alerts = []
         self.ws_clients     = set()
         self.price_broker   = PriceSignalBroker()
         self.dr_controller  = DemandResponseController()
@@ -136,9 +138,9 @@ state = AppState()
 
 
 async def consume_redis() -> None:
-    log.info("Redis consumer started — channels: factory.telemetry, ai.recommendation, opti-twin.logs")
+    log.info("Redis consumer started — channels: factory.telemetry, ai.recommendation, ai.maintenance_alert, opti-twin.logs")
     async for channel, data in state.broker.subscribe(
-        "factory.telemetry", "ai.recommendation", "opti-twin.logs"
+        "factory.telemetry", "ai.recommendation", "ai.maintenance_alert", "opti-twin.logs"
     ):
         if channel == "factory.telemetry":
             state.last_telemetry = data
@@ -157,6 +159,23 @@ async def consume_redis() -> None:
                 data.get("machine_health"),
             )
             await broadcast({"type": "recommendation", "data": data})
+
+        elif channel == "ai.maintenance_alert":
+            state.maintenance_alerts = [data, *state.maintenance_alerts][:50]
+            state.kpi.ingest_recommendation({
+                "maintenance_alert": data.get("alert_type"),
+                "maintenance_risk_score": data.get("risk_score", 0.0),
+                "operational_efficiency_score": data.get("operational_efficiency_score", 0.0),
+                "process_stability_score": data.get("process_stability_score", 0.0),
+                "ai_enabled": False,
+            })
+            log.warning(
+                "Predictive maintenance alert: %s risk=%.2f level=%s",
+                data.get("alert_type"),
+                float(data.get("risk_score", 0.0)),
+                data.get("risk_level"),
+            )
+            await broadcast({"type": "maintenance_alert", "data": data})
 
         elif channel == "opti-twin.logs":
             # Cross-service log aggregation from AI engine + simulator
@@ -284,6 +303,11 @@ async def post_telemetry(t: TelemetryInput):
 @app.get("/api/v1/recommendation")
 async def get_recommendation() -> Optional[dict]:
     return state.last_recommendation
+
+
+@app.get("/api/v1/maintenance/alerts")
+async def get_maintenance_alerts() -> dict:
+    return {"alerts": state.maintenance_alerts}
 
 
 @app.get("/api/v1/stats", response_model=KPISnapshot)
@@ -467,6 +491,8 @@ async def ws_live_feed(ws: WebSocket):
         await ws.send_text(json.dumps({"type": "telemetry", "data": state.last_telemetry}, default=str))
     if state.last_recommendation:
         await ws.send_text(json.dumps({"type": "recommendation", "data": state.last_recommendation}, default=str))
+    for alert in state.maintenance_alerts[:5]:
+        await ws.send_text(json.dumps({"type": "maintenance_alert", "data": alert}, default=str))
     try:
         while True:
             msg = await ws.receive_text()

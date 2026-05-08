@@ -81,12 +81,15 @@ class EAFState:
     batches_today: int = 0
     production_backlog: int = 0
     current_batch_weight: float = 180.0
+    idle_minutes_today: float = 0.0
+    cycle_efficiency_pct: float = 85.0
 
     # Thermal
     bath_temp_c: float = 1250.0
     wall_panel_temp_c: float = 110.0
     electrode_temp_c: float = 1500.0
     cooling_water_outlet_c: float = 35.0
+    thermal_stress_index: float = 0.0
 
     # Electrical
     arc_power_mw: float = 0.0
@@ -94,6 +97,7 @@ class EAFState:
     energy_this_heat_kwh: float = 0.0
     energy_kwh_today: float = 0.0
     grid_frequency_hz: float = 50.00
+    vibration_mm_s: float = 2.0
 
     # Electrodes
     electrode_position_mm: float = 250.0
@@ -267,6 +271,57 @@ class EAFMachine:
         kwh_added = s.arc_power_mw * 1000.0 * sim_hours_this_tick
         s.energy_this_heat_kwh += kwh_added
         s.energy_kwh_today += kwh_added
+
+        # Operational-efficiency signals used by the flat-pricing optimizer.
+        productive_phase = s.phase not in (HeatPhase.CHARGING, HeatPhase.TAPPING, HeatPhase.IDLE)
+        safe_derate_active = (
+            s.crisis_grid_spike
+            or s.crisis_transformer_alarm
+            or s.crisis_wall_overheat
+        )
+        if productive_phase and s.arc_power_mw < 45.0 and not safe_derate_active:
+            s.idle_minutes_today += sim_dt_min
+
+        wall_component = max(0.0, (s.wall_panel_temp_c - 170.0) / 80.0) * 45.0
+        bath_component = max(0.0, (s.bath_temp_c - 1650.0) / 80.0) * 20.0
+        electrode_component = max(0.0, (s.electrode_temp_c - 2450.0) / 450.0) * 20.0
+        cooling_component = max(0.0, (s.cooling_water_outlet_c - 52.0) / 18.0) * 15.0
+        s.thermal_stress_index = max(
+            0.0,
+            min(100.0, wall_component + bath_component + electrode_component + cooling_component),
+        )
+
+        target_energy_per_heat_kwh = max(1.0, s.current_batch_weight * 450.0)
+        if s.heat_progress_pct > 5.0 and s.energy_this_heat_kwh > 0.0:
+            projected_heat_kwh = s.energy_this_heat_kwh / max(0.05, s.heat_progress_pct / 100.0)
+            energy_efficiency = max(
+                55.0,
+                min(105.0, 100.0 * target_energy_per_heat_kwh / projected_heat_kwh),
+            )
+        else:
+            energy_efficiency = 88.0
+        phase_reference_power = PHASE_POWER_PROFILE_MW.get(s.phase, 0.0)
+        if productive_phase and phase_reference_power > 0.0:
+            utilization = min(1.05, s.arc_power_mw / phase_reference_power)
+        else:
+            utilization = 1.0
+        idle_penalty = min(18.0, s.idle_minutes_today * 0.3)
+        stress_penalty = s.thermal_stress_index * 0.12
+        s.cycle_efficiency_pct = max(
+            40.0,
+            min(100.0, energy_efficiency * 0.72 + utilization * 28.0 - idle_penalty - stress_penalty),
+        )
+
+        vibration_target = (
+            1.7
+            + s.thermal_stress_index * 0.025
+            + max(0.0, 0.92 - s.power_factor) * 5.0
+            + (2.8 if s.crisis_electrode_break else 0.0)
+            + (1.4 if s.crisis_transformer_alarm else 0.0)
+            + random.uniform(-0.15, 0.20)
+        )
+        s.vibration_mm_s += (vibration_target - s.vibration_mm_s) * 0.35
+        s.vibration_mm_s = max(0.5, min(10.0, s.vibration_mm_s))
 
         # Electrode consumption — modern UHP baseline ~1.7 kg/t × melt phase intensity
         if s.phase in (HeatPhase.BORE_DOWN, HeatPhase.MELTING_PHASE_1, HeatPhase.MELTING_PHASE_2):

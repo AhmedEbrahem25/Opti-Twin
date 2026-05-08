@@ -5,6 +5,10 @@ type Props = {
   lastRec?: Recommendation;
   egpSavedToday: number;
   co2SavedKg: number;
+  maintenanceAlertsToday?: number;
+  avgMaintenanceRisk?: number;
+  avgOperationalEfficiency?: number;
+  avgProcessStability?: number;
 };
 
 function fmt(n: number, d = 0): string {
@@ -19,6 +23,10 @@ export default function KPIBanner({
   lastRec,
   egpSavedToday,
   co2SavedKg,
+  maintenanceAlertsToday = 0,
+  avgMaintenanceRisk = 0,
+  avgOperationalEfficiency = 0,
+  avgProcessStability = 0,
 }: Props) {
   const t = telemetry;
   const pfBracket = t?.pf_penalty_bracket;
@@ -44,7 +52,7 @@ export default function KPIBanner({
   const costNow = t ? t.arc_power_mw * 1000 * t.electricity_price : 0;
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
+    <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 mb-4">
       <Card title="Saved Today" value={`${fmt(egpSavedToday, 0)} EGP`} sub="est. savings" />
       <Card
         title="Running Cost"
@@ -72,6 +80,18 @@ export default function KPIBanner({
         valueClass={anyCrisis ? "text-red-400 animate-pulse" : healthColor}
       />
       <Card title="CO₂ Saved" value={`${fmt(co2SavedKg, 1)} kg`} sub="today" />
+      <Card
+        title="Ops Efficiency"
+        value={`${fmt(avgOperationalEfficiency || t?.cycle_efficiency_pct || 0, 0)}%`}
+        sub={`stability ${fmt(avgProcessStability || 0, 0)}%`}
+      />
+      <Card
+        title="Maint. Risk"
+        value={`${fmt(avgMaintenanceRisk * 100, 0)}%`}
+        sub={`${maintenanceAlertsToday} alert${maintenanceAlertsToday === 1 ? "" : "s"} today`}
+        valueClass={avgMaintenanceRisk >= 0.55 ? "text-red-400" : "text-emerald-400"}
+        pulse={avgMaintenanceRisk >= 0.75}
+      />
     </div>
   );
 }

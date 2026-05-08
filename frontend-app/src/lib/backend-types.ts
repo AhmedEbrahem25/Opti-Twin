@@ -25,6 +25,10 @@ export type BackendTelemetry = {
   current_batch_weight: number;
   batches_today: number;
   production_backlog: number;
+  idle_minutes_today?: number;
+  cycle_efficiency_pct?: number;
+  thermal_stress_index?: number;
+  vibration_mm_s?: number;
   electricity_price: number;
   tariff_class: string;
   tou_mode: boolean;
@@ -55,6 +59,18 @@ export type BackendRecommendation = {
   reward_components: Record<string, number>;
   dominant_reason: string;
   ai_enabled: boolean;
+  maintenance_risk_score?: number;
+  maintenance_risk_level?: "NOMINAL" | "WATCH" | "WARNING" | "CRITICAL";
+  maintenance_alert?: string | null;
+  maintenance_fault_prediction?: string | null;
+  maintenance_recommended_action?: string;
+  maintenance_safe_recovery_action?: string | null;
+  maintenance_xai_reason?: string;
+  maintenance_xai_reason_ar?: string;
+  operational_efficiency_score?: number;
+  throughput_score?: number;
+  process_stability_score?: number;
+  thermal_stress_index?: number;
 };
 
 export type BackendKPI = {
@@ -66,6 +82,26 @@ export type BackendKPI = {
   thermal_incidents_today: number;
   pf_penalty_avoided_today_egp: number;
   ai_decisions_today: number;
+  maintenance_alerts_today?: number;
+  avg_maintenance_risk?: number;
+  avg_operational_efficiency?: number;
+  avg_process_stability?: number;
+  idle_minutes_today?: number;
+};
+
+export type BackendMaintenanceAlert = {
+  timestamp: string;
+  machine_id: string;
+  alert_type: string;
+  risk_score: number;
+  risk_level: "WARNING" | "CRITICAL";
+  fault_prediction?: string | null;
+  recommended_action?: string;
+  safe_recovery_action?: string | null;
+  xai_reason?: string;
+  xai_reason_ar?: string;
+  operational_efficiency_score?: number;
+  process_stability_score?: number;
 };
 
 export type BackendLivePrice = {
@@ -163,7 +199,8 @@ export type BackendLogsResponse = {
 export type WSFrame =
   | { type: "telemetry"; data: BackendTelemetry }
   | { type: "recommendation"; data: BackendRecommendation }
-  | { type: "pricing"; data: BackendLivePrice };
+  | { type: "pricing"; data: BackendLivePrice }
+  | { type: "maintenance_alert"; data: BackendMaintenanceAlert };
 
 export const LIVE_MACHINE_ID = "factory-1-m1";
 export const LIVE_MACHINE_NAME = "EAF #2 — 185t Danieli";

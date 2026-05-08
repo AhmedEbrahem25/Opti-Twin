@@ -37,6 +37,10 @@ class RewardComponents:
     quality_bonus: float = 0.0
     electrode_waste: float = 0.0
     pf_penalty: float = 0.0
+    productivity_bonus: float = 0.0
+    process_stability_bonus: float = 0.0
+    maintenance_risk_penalty: float = 0.0
+    idle_time_penalty: float = 0.0
     total: float = 0.0
 
     def as_dict(self) -> Dict[str, float]:
@@ -47,6 +51,10 @@ class RewardComponents:
             "quality_bonus": round(self.quality_bonus, 2),
             "electrode_waste": round(self.electrode_waste, 2),
             "pf_penalty": round(self.pf_penalty, 2),
+            "productivity_bonus": round(self.productivity_bonus, 2),
+            "process_stability_bonus": round(self.process_stability_bonus, 2),
+            "maintenance_risk_penalty": round(self.maintenance_risk_penalty, 2),
+            "idle_time_penalty": round(self.idle_time_penalty, 2),
             "total": round(self.total, 2),
         }
 
@@ -95,6 +103,21 @@ def compute_reward(
     # PF penalty
     rc.pf_penalty = float(state.get("pf_penalty_egp_per_hour_est", 0.0)) / 3600.0
 
+    # Flat-pricing operational objectives. These make "do the right thing"
+    # visible even when electricity price is constant: finish heats efficiently,
+    # avoid idle drift, and keep the process stable without pushing equipment.
+    cycle_eff = float(state.get("cycle_efficiency_pct", 85.0))
+    stability = float(state.get("process_stability_score", 85.0))
+    throughput = float(state.get("throughput_score", 85.0))
+    idle_min = float(state.get("idle_minutes_today", 0.0))
+    maint_risk = float(state.get("maintenance_risk_score", 0.0))
+    thermal_stress = float(state.get("thermal_stress_index", 0.0)) / 100.0
+
+    rc.productivity_bonus = max(0.0, (cycle_eff + throughput - 160.0) / 40.0)
+    rc.process_stability_bonus = max(0.0, (stability - 75.0) / 25.0)
+    rc.idle_time_penalty = min(10.0, idle_min * 0.05)
+    rc.maintenance_risk_penalty = maint_risk * 15.0 + thermal_stress * 4.0
+
     rc.total = (
         weights.alpha * rc.energy_savings_egp
         - weights.beta * rc.machine_stress_penalty
@@ -102,5 +125,9 @@ def compute_reward(
         + weights.delta * rc.quality_bonus
         - weights.epsilon * rc.electrode_waste
         - weights.zeta * rc.pf_penalty
+        + weights.gamma * 0.35 * rc.productivity_bonus
+        + weights.delta * 0.55 * rc.process_stability_bonus
+        - weights.beta * rc.maintenance_risk_penalty
+        - weights.gamma * 0.20 * rc.idle_time_penalty
     )
     return rc

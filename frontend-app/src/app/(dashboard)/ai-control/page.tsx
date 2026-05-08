@@ -44,6 +44,7 @@ const AI_MODELS = [
   { id: "M1", name: "PPO Policy", desc: "SB3 actor-critic", activeWhen: "ai", badge: "Core" },
   { id: "M2", name: "LSTM Forecaster", desc: "24 h price ahead", activeWhen: "always", badge: "Forecast" },
   { id: "M3", name: "Anomaly AE", desc: "Sensor autoencoder", activeWhen: "always", badge: "Safety" },
+  { id: "M6", name: "Predictive Maintenance", desc: "Risk + safe recovery", activeWhen: "always", badge: "Live" },
   { id: "M4", name: "Behavioral Clone", desc: "Operator imitation", activeWhen: "passive", badge: "Stub" },
   { id: "M5", name: "Preference Reward", desc: "Profile α–γ injector", activeWhen: "ai", badge: "Reward" },
 ] as const;
@@ -156,8 +157,8 @@ export default function AIControlPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard label="AI Actions Today" value={kpis.aiActionsToday} icon={<Brain size={16} />} trend={8.5} accentColor="var(--color-accent)" />
         <KPICard label="Total Savings" value={kpis.totalCostSaved} suffix=" EGP" icon={<DollarSign size={16} />} trend={18.3} accentColor="var(--color-success)" />
-        <KPICard label="Avg Confidence" value={89.4} suffix="%" icon={<Shield size={16} />} accentColor="var(--color-cyan)" />
-        <KPICard label="Applied Rate" value={87} suffix="%" icon={<CheckCircle size={16} />} accentColor="var(--color-info)" />
+        <KPICard label="Ops Efficiency" value={kpis.avgOperationalEfficiency || kpis.avgEfficiency} suffix="%" icon={<CheckCircle size={16} />} accentColor="var(--color-info)" />
+        <KPICard label="Maint. Risk" value={kpis.avgMaintenanceRisk * 100} suffix="%" icon={<Shield size={16} />} accentColor={kpis.avgMaintenanceRisk >= 0.55 ? "var(--color-danger)" : "var(--color-cyan)"} />
       </div>
 
       {/* Policy / Pricing controls */}

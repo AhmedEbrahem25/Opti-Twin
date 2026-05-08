@@ -123,6 +123,11 @@ function DecisionEntry({
           : r.machine_health === "WARNING" ? "text-amber-400"
           : "text-emerald-400"
         }>{r.machine_health}</span>
+        {r.maintenance_risk_level && r.maintenance_risk_level !== "NOMINAL" && (
+          <span className={r.maintenance_risk_level === "CRITICAL" ? "text-red-400" : "text-amber-400"}>
+            maint {r.maintenance_risk_level} ({((r.maintenance_risk_score ?? 0) * 100).toFixed(0)}%)
+          </span>
+        )}
       </div>
     </div>
   );

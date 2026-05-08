@@ -20,6 +20,10 @@ export type Telemetry = {
   current_batch_weight: number;
   batches_today: number;
   production_backlog: number;
+  idle_minutes_today?: number;
+  cycle_efficiency_pct?: number;
+  thermal_stress_index?: number;
+  vibration_mm_s?: number;
   electricity_price: number;
   tariff_class: string;
   tou_mode: boolean;
@@ -54,6 +58,18 @@ export type Recommendation = {
   reward_components: Record<string, number>;
   dominant_reason: string;
   ai_enabled: boolean;
+  maintenance_risk_score?: number;
+  maintenance_risk_level?: "NOMINAL" | "WATCH" | "WARNING" | "CRITICAL";
+  maintenance_alert?: string | null;
+  maintenance_fault_prediction?: string | null;
+  maintenance_recommended_action?: string;
+  maintenance_safe_recovery_action?: string | null;
+  maintenance_xai_reason?: string;
+  maintenance_xai_reason_ar?: string;
+  operational_efficiency_score?: number;
+  throughput_score?: number;
+  process_stability_score?: number;
+  thermal_stress_index?: number;
 };
 
 export type LivePrice = {
@@ -68,9 +84,23 @@ export type LivePrice = {
   label: string;
 };
 
+export type MaintenanceAlert = {
+  timestamp: string;
+  machine_id: string;
+  alert_type: string;
+  risk_score: number;
+  risk_level: "WARNING" | "CRITICAL";
+  fault_prediction?: string | null;
+  recommended_action?: string;
+  safe_recovery_action?: string | null;
+  xai_reason?: string;
+  xai_reason_ar?: string;
+};
+
 export type LiveFrame = {
   telemetry?: Telemetry;
   recommendations: Recommendation[];
+  maintenanceAlerts: MaintenanceAlert[];
   energySeries: { t: number; mw: number; price: number; bath: number }[];
   connection: "connecting" | "open" | "closed";
   livePrice?: LivePrice;
@@ -85,6 +115,7 @@ const MAX_LOG = 80;
 export function useLiveFeed(): LiveFrame {
   const [frame, setFrame] = useState<LiveFrame>({
     recommendations: [],
+    maintenanceAlerts: [],
     energySeries: [],
     connection: "connecting",
   });
@@ -129,6 +160,12 @@ export function useLiveFeed(): LiveFrame {
           } else if (parsed.type === "pricing") {
             const p = parsed.data as LivePrice;
             setFrame((f) => ({ ...f, livePrice: p }));
+          } else if (parsed.type === "maintenance_alert") {
+            const alert = parsed.data as MaintenanceAlert;
+            setFrame((f) => {
+              const alerts = [alert, ...f.maintenanceAlerts].slice(0, 20);
+              return { ...f, maintenanceAlerts: alerts };
+            });
           }
         } catch {}
       };

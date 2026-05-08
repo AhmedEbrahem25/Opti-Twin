@@ -48,6 +48,10 @@ class TelemetryInput(BaseModel):
     current_batch_weight: float = 180.0
     batches_today: int = 0
     production_backlog: int = 0
+    idle_minutes_today: float = 0.0
+    cycle_efficiency_pct: float = 85.0
+    thermal_stress_index: float = 0.0
+    vibration_mm_s: float = 2.0
 
     # Tariff
     electricity_price: float = 1.60
@@ -92,6 +96,18 @@ class RecommendationOutput(BaseModel):
     reward_components: Dict[str, float] = Field(default_factory=dict)
     dominant_reason: str = "stable"
     ai_enabled: bool = False
+    maintenance_risk_score: float = 0.0
+    maintenance_risk_level: Literal["NOMINAL", "WATCH", "WARNING", "CRITICAL"] = "NOMINAL"
+    maintenance_alert: Optional[str] = None
+    maintenance_fault_prediction: Optional[str] = None
+    maintenance_recommended_action: str = "NONE"
+    maintenance_safe_recovery_action: Optional[str] = None
+    maintenance_xai_reason: str = ""
+    maintenance_xai_reason_ar: str = ""
+    operational_efficiency_score: float = 0.0
+    throughput_score: float = 0.0
+    process_stability_score: float = 0.0
+    thermal_stress_index: float = 0.0
 
 
 class KPISnapshot(BaseModel):
@@ -103,6 +119,11 @@ class KPISnapshot(BaseModel):
     thermal_incidents_today: int = 0
     pf_penalty_avoided_today_egp: float = 0.0
     ai_decisions_today: int = 0
+    maintenance_alerts_today: int = 0
+    avg_maintenance_risk: float = 0.0
+    avg_operational_efficiency: float = 0.0
+    avg_process_stability: float = 0.0
+    idle_minutes_today: float = 0.0
 
 
 class AIToggleRequest(BaseModel):

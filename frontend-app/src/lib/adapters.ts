@@ -10,6 +10,7 @@ import type {
 import type {
   BackendCrisisFlags,
   BackendKPI,
+  BackendMaintenanceAlert,
   BackendRecommendation,
   BackendTelemetry,
 } from "./backend-types";
@@ -47,7 +48,12 @@ export function adaptTelemetry(t: BackendTelemetry): TelemetryPoint {
     // Use power-factor deviation from 1.0 as a proxy "vibration" so the existing
     // sensor card stays visually populated; real backend has no vibration sensor.
     vibration: Math.max(0, (1 - t.power_factor) * 10),
+    vibrationMmS: t.vibration_mm_s,
     flowRate: t.cooling_water_flow_lmin,
+    idleMinutesToday: t.idle_minutes_today,
+    cycleEfficiencyPct: t.cycle_efficiency_pct,
+    thermalStressIndex: t.thermal_stress_index,
+    operationalEfficiencyScore: t.cycle_efficiency_pct,
   };
 }
 
@@ -67,6 +73,9 @@ const ACTION_LABELS: ReadonlySet<RecommendationAction> = new Set<RecommendationA
   "PRE_PEAK_DROP",
   "GRID_RIDE_THROUGH",
   "TRANSFORMER_DERATE",
+  "OPTIMIZE_THROUGHPUT",
+  "STABILIZE_PROCESS",
+  "MAINTENANCE_DERATE",
 ]);
 
 function normaliseAction(raw: string): RecommendationAction {
@@ -109,6 +118,17 @@ export function adaptRecommendation(r: BackendRecommendation): Recommendation {
     dominantReason: r.dominant_reason,
     machineHealth: r.machine_health,
     productionStatus: r.production_status,
+    maintenanceRiskScore: r.maintenance_risk_score,
+    maintenanceRiskLevel: r.maintenance_risk_level,
+    maintenanceAlert: r.maintenance_alert,
+    maintenanceFaultPrediction: r.maintenance_fault_prediction,
+    maintenanceRecommendedAction: r.maintenance_recommended_action,
+    maintenanceSafeRecoveryAction: r.maintenance_safe_recovery_action,
+    maintenanceXaiReason: r.maintenance_xai_reason,
+    operationalEfficiencyScore: r.operational_efficiency_score,
+    throughputScore: r.throughput_score,
+    processStabilityScore: r.process_stability_score,
+    thermalStressIndex: r.thermal_stress_index,
     confidence: 90,
     rewardComponents: {
       energySavingsScore: toEnergySavingsScore(r),
@@ -144,9 +164,14 @@ export function adaptKPI(k: BackendKPI, fallback: KPISnapshot): KPISnapshot {
     totalEnergySavedKwh: Math.round(totalEnergyMWh * 1000),
     totalCostSaved: Math.round(k.egp_saved_today),
     aiActionsToday: k.ai_decisions_today,
-    avgEfficiency: Math.round(k.avg_power_factor * 100 * 10) / 10,
-    activeAlerts: k.thermal_incidents_today,
+    avgEfficiency: Math.round((k.avg_operational_efficiency ?? k.avg_power_factor * 100) * 10) / 10,
+    activeAlerts: k.thermal_incidents_today + (k.maintenance_alerts_today ?? 0),
     uptime: fallback.uptime,
+    maintenanceAlertsToday: k.maintenance_alerts_today ?? fallback.maintenanceAlertsToday,
+    avgMaintenanceRisk: Math.round((k.avg_maintenance_risk ?? fallback.avgMaintenanceRisk) * 1000) / 1000,
+    avgOperationalEfficiency: Math.round((k.avg_operational_efficiency ?? fallback.avgOperationalEfficiency) * 10) / 10,
+    avgProcessStability: Math.round((k.avg_process_stability ?? fallback.avgProcessStability) * 10) / 10,
+    idleMinutesToday: Math.round((k.idle_minutes_today ?? fallback.idleMinutesToday) * 10) / 10,
   };
 }
 
@@ -190,4 +215,22 @@ export function crisisFlagsToAlerts(
     }
   });
   return out;
+}
+
+export function maintenanceAlertToAlert(a: BackendMaintenanceAlert): Alert {
+  const risk = a.risk_score ?? 0;
+  return {
+    id: `maintenance-${a.machine_id}-${a.alert_type}-${a.timestamp}`,
+    factoryId: LIVE_FACTORY_ID,
+    machineId: LIVE_MACHINE_ID,
+    machineName: LIVE_MACHINE_NAME,
+    severity: risk >= 0.75 || a.risk_level === "CRITICAL" ? "critical" : "warning",
+    title: a.risk_level === "CRITICAL" ? "Predictive failure risk" : "Predictive maintenance warning",
+    message:
+      a.xai_reason ||
+      a.fault_prediction ||
+      "Machine behavior is drifting from the safe operating envelope.",
+    timestamp: a.timestamp ?? new Date().toISOString(),
+    acknowledged: false,
+  };
 }

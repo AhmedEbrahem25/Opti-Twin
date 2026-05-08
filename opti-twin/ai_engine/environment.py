@@ -38,6 +38,9 @@ ACTIONS = [
     "PRE_PEAK_DROP",
     "GRID_RIDE_THROUGH",
     "TRANSFORMER_DERATE",
+    "OPTIMIZE_THROUGHPUT",
+    "STABILIZE_PROCESS",
+    "MAINTENANCE_DERATE",
 ]
 
 # 16 core telemetry + 6 M2 forecast summary + 16 live pricing + 1 M3 anomaly.
@@ -377,6 +380,19 @@ class OptiTwinEAFEnv:
             s["arc_power_mw"] = 60.0
         elif label == "TRANSFORMER_DERATE":
             s["arc_power_mw"] = min(75.0, s["arc_power_mw"])
+        elif label == "OPTIMIZE_THROUGHPUT":
+            if (
+                s["wall_panel_temp"] < 185.0
+                and s["furnace_bath_temp"] < 1645.0
+                and s["grid_frequency"] >= 49.8
+            ):
+                s["arc_power_mw"] = min(105.0, s["arc_power_mw"] + 8.0)
+        elif label == "STABILIZE_PROCESS":
+            s["wall_panel_temp"] = max(80.0, s["wall_panel_temp"] - 6.0)
+            s["power_factor"] = min(0.94, s["power_factor"] + 0.02)
+        elif label == "MAINTENANCE_DERATE":
+            s["arc_power_mw"] = max(60.0, s["arc_power_mw"] - 15.0)
+            s["wall_panel_temp"] = max(80.0, s["wall_panel_temp"] - 10.0)
         # HOLD_STEADY: no change
 
         # Advance sim clock + TOU pricing schedule

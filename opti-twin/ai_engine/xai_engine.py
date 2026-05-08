@@ -71,6 +71,34 @@ def generate_reason(
     dominant: str,
 ) -> Tuple[str, str]:
     """Return (english, arabic) explanation strings."""
+    if action_label == "OPTIMIZE_THROUGHPUT":
+        return (
+            "Flat pricing is active and the furnace is inside the safe envelope: "
+            f"efficiency {float(state.get('operational_efficiency_score', 0.0)):.0f}%, "
+            f"stability {float(state.get('process_stability_score', 0.0)):.0f}%, "
+            f"maintenance risk {float(state.get('maintenance_risk_score', 0.0)):.2f}. "
+            "Increasing arc power gently to recover throughput without crossing thermal limits.",
+            "التسعير الثابت نشط والفرن داخل حدود السلامة. يتم رفع قدرة القوس تدريجيا "
+            "لاستعادة الإنتاجية دون تجاوز الحدود الحرارية.",
+        )
+    if action_label == "STABILIZE_PROCESS":
+        return (
+            f"Process stability is {float(state.get('process_stability_score', 0.0)):.0f}% "
+            f"with thermal stress {float(state.get('thermal_stress_index', 0.0)):.0f}/100. "
+            "Holding aggressive optimization, raising cooling/PF support, and preserving equipment life.",
+            "انخفض استقرار العملية. تم إيقاف التحسين الهجومي وزيادة التبريد ودعم معامل القدرة "
+            "لحماية عمر المعدات.",
+        )
+    if action_label == "MAINTENANCE_DERATE":
+        fault = state.get("maintenance_fault_prediction") or "process drift detected"
+        return (
+            f"Predictive maintenance risk is {state.get('maintenance_risk_level', 'NOMINAL')} "
+            f"({float(state.get('maintenance_risk_score', 0.0)):.2f}): {fault}. "
+            "Derating arc power and increasing cooling now; safety constraints override productivity "
+            "until inspection/recovery is complete.",
+            "مخاطر الصيانة التنبؤية مرتفعة. يتم خفض قدرة القوس وزيادة التبريد الآن؛ "
+            "قيود السلامة تتقدم على الإنتاجية حتى اكتمال الفحص أو التعافي.",
+        )
     key = (action_label, dominant)
     template = TEMPLATES.get(key)
     if template is None:
@@ -108,6 +136,10 @@ def pick_dominant_component(reward_components: Dict[str, float]) -> str:
         "pf_penalty": reward_components.get("pf_penalty", 0.0),
         "machine_stress": reward_components.get("machine_stress_penalty", 0.0),
         "production_delay": reward_components.get("production_delay_penalty", 0.0),
+        "productivity_bonus": reward_components.get("productivity_bonus", 0.0),
+        "process_stability_bonus": reward_components.get("process_stability_bonus", 0.0),
+        "maintenance_risk_penalty": reward_components.get("maintenance_risk_penalty", 0.0),
+        "idle_time_penalty": reward_components.get("idle_time_penalty", 0.0),
         "stable": 0.001,  # ensure fallback
     }
     return max(candidates, key=lambda k: abs(candidates[k]))

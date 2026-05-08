@@ -111,11 +111,13 @@ export default function MachinePage({ params }: { params: Promise<{ id: string }
       </div>
 
       {/* KPI Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
         <KPICard label="Temperature" value={latest?.temperature || 0} suffix="°C" icon={<Thermometer size={16} />} accentColor="var(--color-danger)" />
         <KPICard label={isLive ? "Power Draw" : "RPM"} value={isLive ? (latest?.energyKwh ?? 0) / 1000 : latest?.rpm || 0} suffix={isLive ? " MW" : ""} icon={<Gauge size={16} />} accentColor="var(--color-cyan)" format={(v) => isLive ? v.toFixed(1) : Math.round(v).toString()} />
         <KPICard label="Energy Usage" value={latest?.energyKwh || 0} suffix=" kWh" icon={<Zap size={16} />} accentColor="var(--color-warning)" />
         <KPICard label="Cost Rate" value={latest?.costRate || 0} suffix=" EGP/kWh" icon={<DollarSign size={16} />} accentColor={latest?.isPeak ? "var(--color-danger)" : "var(--color-success)"} />
+        <KPICard label="Cycle Eff." value={latest?.cycleEfficiencyPct || latestRec?.operationalEfficiencyScore || 0} suffix="%" icon={<Activity size={16} />} accentColor="var(--color-info)" />
+        <KPICard label="Maint. Risk" value={(latestRec?.maintenanceRiskScore ?? 0) * 100} suffix="%" icon={<Brain size={16} />} accentColor={(latestRec?.maintenanceRiskScore ?? 0) >= 0.55 ? "var(--color-danger)" : "var(--color-cyan)"} />
         <div className="flex items-center justify-center">
           <MetricRing value={healthScore} size={72} strokeWidth={5} label="Health" />
         </div>
@@ -227,6 +229,11 @@ export default function MachinePage({ params }: { params: Promise<{ id: string }
                     </span>
                     <span className="text-[10px] text-text-muted">{latestRec.magnitudePct.toFixed(0)}% magnitude</span>
                   </div>
+                  {latestRec.maintenanceAlert && (
+                    <div className="pt-2 border-t border-accent/10 text-[10px] text-warning leading-relaxed">
+                      {latestRec.maintenanceRiskLevel} maintenance risk: {latestRec.maintenanceFaultPrediction || latestRec.maintenanceRecommendedAction}
+                    </div>
+                  )}
                 </div>
               )}
               <div className="space-y-3">
@@ -265,6 +272,9 @@ export default function MachinePage({ params }: { params: Promise<{ id: string }
                   { label: "Temperature", value: `${latest?.temperature?.toFixed(1) || "—"}°C`, status: (latest?.temperature || 0) > (isLive ? 1650 : 85) ? "warning" : "normal" },
                   { label: isLive ? "Arc Power" : "RPM", value: isLive ? `${((latest?.energyKwh ?? 0) / 1000).toFixed(1)} MW` : `${Math.round(latest?.rpm || 0)}`, status: "normal" },
                   { label: isLive ? "PF Δ proxy" : "Vibration", value: `${latest?.vibration?.toFixed(2) || "—"} ${isLive ? "" : "mm/s"}`, status: (latest?.vibration || 0) > 4.5 ? "warning" : "normal" },
+                  { label: "Vibration", value: `${latest?.vibrationMmS?.toFixed(2) || "—"} mm/s`, status: (latest?.vibrationMmS || 0) > 5 ? "warning" : "normal" },
+                  { label: "Thermal Stress", value: `${latest?.thermalStressIndex?.toFixed(0) || "—"}/100`, status: (latest?.thermalStressIndex || 0) > 55 ? "warning" : "normal" },
+                  { label: "Idle Today", value: `${latest?.idleMinutesToday?.toFixed(1) || "0.0"} min`, status: (latest?.idleMinutesToday || 0) > 20 ? "warning" : "normal" },
                   { label: isLive ? "Cooling Flow" : "Pressure", value: isLive ? `${latest?.flowRate?.toFixed(0) || "—"} L/min` : `${latest?.pressure?.toFixed(1) || "—"} bar`, status: "normal" },
                   { label: "Energy", value: `${latest?.energyKwh?.toFixed(1) || "—"} kWh`, status: "normal" },
                   { label: "Cost Rate", value: `${latest?.costRate?.toFixed(2) || "—"} EGP`, status: latest?.isPeak ? "peak" : "normal" },

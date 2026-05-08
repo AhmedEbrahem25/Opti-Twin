@@ -33,6 +33,7 @@ interface TelemetryState {
   addRecommendation: (rec: Recommendation) => void;
   addXAILog: (log: XAILogEntry) => void;
   setLiveAlerts: (alerts: Alert[]) => void;
+  upsertLiveAlert: (alert: Alert) => void;
   setKPIs: (kpis: KPISnapshot) => void;
   setConnected: (connected: boolean) => void;
   toggleAI: () => void;
@@ -60,6 +61,11 @@ export const useTelemetryStore = create<TelemetryState>((set) => ({
     avgEfficiency: 0,
     activeAlerts: 0,
     uptime: 99.2,
+    maintenanceAlertsToday: 0,
+    avgMaintenanceRisk: 0,
+    avgOperationalEfficiency: 0,
+    avgProcessStability: 0,
+    idleMinutesToday: 0,
   },
   recommendations: [],
   xaiLogs: [],
@@ -102,6 +108,11 @@ export const useTelemetryStore = create<TelemetryState>((set) => ({
     }),
 
   setLiveAlerts: (alerts) => set({ liveAlerts: alerts }),
+  upsertLiveAlert: (alert) =>
+    set((state) => {
+      const rest = state.liveAlerts.filter((a) => a.id !== alert.id);
+      return { liveAlerts: [alert, ...rest].slice(0, 20) };
+    }),
   setKPIs: (kpis) => set({ kpis }),
   setConnected: (connected) => set({ isConnected: connected }),
   toggleAI: () => set((s) => ({ aiEnabled: !s.aiEnabled })),

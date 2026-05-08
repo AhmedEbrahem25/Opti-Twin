@@ -25,6 +25,11 @@ export default function Dashboard() {
   const [stats, setStats] = useState<{
     egp_saved_today: number;
     co2_saved_kg: number;
+    maintenance_alerts_today?: number;
+    avg_maintenance_risk?: number;
+    avg_operational_efficiency?: number;
+    avg_process_stability?: number;
+    idle_minutes_today?: number;
   }>({ egp_saved_today: 0, co2_saved_kg: 0 });
 
   useEffect(() => {
@@ -111,6 +116,10 @@ export default function Dashboard() {
           lastRec={frame.recommendations[0]}
           egpSavedToday={stats.egp_saved_today}
           co2SavedKg={stats.co2_saved_kg}
+          maintenanceAlertsToday={stats.maintenance_alerts_today ?? 0}
+          avgMaintenanceRisk={stats.avg_maintenance_risk ?? 0}
+          avgOperationalEfficiency={stats.avg_operational_efficiency ?? 0}
+          avgProcessStability={stats.avg_process_stability ?? 0}
         />
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
