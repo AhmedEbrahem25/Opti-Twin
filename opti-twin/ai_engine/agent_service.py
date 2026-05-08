@@ -52,7 +52,7 @@ class AIService:
     def __init__(self, r: redis.Redis, agent: OptiTwinAgent) -> None:
         self.r     = r
         self.agent = agent
-        self.ai_enabled = False
+        self.ai_enabled = True
         self._lock = threading.Lock()
         self._rec_count  = 0
         self._hold_count = 0

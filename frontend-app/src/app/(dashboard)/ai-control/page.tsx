@@ -49,26 +49,29 @@ const AI_MODELS = [
   { id: "M5", name: "Preference Reward", desc: "Profile α–γ injector", activeWhen: "ai", badge: "Reward" },
 ] as const;
 
-function buildHourlyActions(xaiLogs: { timestamp: string; savingsEstimate: number }[]) {
+function buildHourlyActions(xaiLogs: { timestamp: string; savingsEstimate: number; applied?: boolean }[]) {
   const now = new Date();
   const buckets: Record<string, { actions: number; savings: number }> = {};
   // Pre-fill last 12 hours so the chart always has shape.
+  const hoursOrder: string[] = [];
   for (let i = 11; i >= 0; i--) {
     const h = new Date(now.getTime() - i * 3_600_000);
     const key = `${h.getHours().toString().padStart(2, "0")}:00`;
     buckets[key] = { actions: 0, savings: 0 };
+    hoursOrder.push(key);
   }
   for (const log of xaiLogs) {
+    if (log.applied === false) continue;
     const h = new Date(log.timestamp).getHours().toString().padStart(2, "0") + ":00";
     if (buckets[h]) {
       buckets[h].actions += 1;
-      buckets[h].savings += log.savingsEstimate;
+      buckets[h].savings += Math.max(0, log.savingsEstimate);
     }
   }
-  return Object.entries(buckets).map(([hour, v]) => ({
+  return hoursOrder.map((hour) => ({
     hour,
-    actions: v.actions,
-    savings: Math.round(v.savings),
+    actions: buckets[hour].actions,
+    savings: Math.round(buckets[hour].savings),
   }));
 }
 

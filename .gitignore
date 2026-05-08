@@ -1,0 +1,81 @@
+# Consolidated Gitignore for Opti-Twin Project
+# This file covers root, frontend-app, and opti-twin sub-projects.
+
+# Dependencies
+**/node_modules/
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# Next.js & Frontend App
+frontend-app/.next/
+/frontend-app/.next/
+frontend-app/.next
+/.next/
+frontend-app/out/
+frontend-app/build/
+frontend-app/.turbo/
+**/.next/
+**/out/
+**/build/
+**/.turbo/
+
+# Testing & Caches
+coverage/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+.eslintcache
+**/.cache/
+*.tsbuildinfo
+next-env.d.ts
+
+# Python (Opti-Twin)
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+**/*.egg-info/
+**/.venv/
+**/venv/
+**/ENV/
+**/env/
+
+# Specific Data & Services
+.vercel
+
+# Logs
+**/*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+**/logs/
+
+# OS & IDEs
+.DS_Store
+**/.idea/
+**/.vscode/
+**/*.swp
+*.pem
+Thumbs.db
+
+# Environment files
+.env*
+!.env.local.example
+!.env.example
+
+
+# Trained ML model checkpoints (from opti-twin)
+opti-twin/ai_engine/models/*.zip
+!opti-twin/ai_engine/models/opti_twin_ppo.zip
+
+# Meilisearch data
+**/opti-twin/data/meili/
+opti-twin/data/meili/**
+/opti-twin/data/meili/
+

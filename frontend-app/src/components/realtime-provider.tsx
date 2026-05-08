@@ -45,6 +45,9 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
           if (parsed.type === "telemetry") {
             const adapted = adaptTelemetry(parsed.data);
             s.addTelemetryPoint(adapted);
+            if (s.touMode !== parsed.data.tou_mode) {
+              s.setTouMode(parsed.data.tou_mode);
+            }
             const maintenanceAlerts = s.liveAlerts.filter((a) =>
               a.id.startsWith("maintenance-"),
             );

@@ -104,7 +104,8 @@ export const useTelemetryStore = create<TelemetryState>((set) => ({
   addXAILog: (log) =>
     set((state) => {
       if (state.xaiLogs[0]?.id === log.id) return state;
-      return { xaiLogs: [log, ...state.xaiLogs].slice(0, 100) };
+      // Allow up to 5000 logs to ensure the 12-hour 'AI Actions Over Time' chart stays populated
+      return { xaiLogs: [log, ...state.xaiLogs].slice(0, 5000) };
     }),
 
   setLiveAlerts: (alerts) => set({ liveAlerts: alerts }),

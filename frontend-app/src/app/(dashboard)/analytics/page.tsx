@@ -23,15 +23,19 @@ export default function AnalyticsPage() {
   const schedule = useTelemetryStore((s) => s.schedule);
 
   const forecastPoints = forecast?.forecast ?? [];
-  const forecastData = forecastPoints.map((p, i) => ({
-    hour: p.timestamp
-      ? new Date(p.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
-      : `+${p.hour ?? i}h`,
-    price: p.price_egp_kwh,
-    p05: p.p05,
-    p95: p.p95,
-    isPeak: p.is_peak,
-  }));
+  const forecastData = forecastPoints.map((p: any, i) => {
+    const hr = p.t_hour ?? p.hour ?? i;
+    const hourStr = `${Math.floor(hr).toString().padStart(2, "0")}:${Math.round((hr % 1) * 60).toString().padStart(2, "0")}`;
+    return {
+      hour: p.timestamp
+        ? new Date(p.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+        : hourStr,
+      price: p.p50 ?? p.price_egp_kwh ?? 0,
+      p05: p.p10 ?? p.p05,
+      p95: p.p90 ?? p.p95,
+      isPeak: p.is_peak,
+    };
+  });
 
   const revenueData = revenue
     ? [
@@ -263,38 +267,43 @@ export default function AnalyticsPage() {
               </p>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-                {schedule.slots.map((slot, i) => (
+                {schedule.slots.map((slot: any, i) => {
+                  const isPeak = slot.is_peak || (slot.melting_avg_price_egp > 1.5);
+                  const isOffPeak = slot.recommended_action === "RUN" || (slot.melting_avg_price_egp <= 1.5);
+                  const startH = Math.floor(slot.start_hour).toString().padStart(2, "0");
+                  const startM = Math.round((slot.start_hour % 1) * 60).toString().padStart(2, "0");
+                  return (
                   <div
                     key={i}
-                    className={`rounded-lg border px-3 py-2.5 text-xs space-y-1 ${
-                      slot.is_peak
+                    className={`rounded-lg border px-3 py-2.5 text-xs space-y-1 flex flex-col justify-center ${
+                      isPeak
                         ? "bg-danger/5 border-danger/20"
-                        : slot.recommended_action === "RUN"
+                        : isOffPeak
                         ? "bg-success/5 border-success/20"
                         : "bg-bg-300 border-border"
                     }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono font-semibold text-text-primary">
-                        {slot.start_hour.toString().padStart(2, "0")}:00
+                    <div className="flex items-center justify-between border-b border-border/50 pb-1 mb-1">
+                      <span className="font-mono font-semibold text-text-primary text-[10px]">
+                        {startH}:{startM}
                       </span>
                       <Badge
-                        variant={slot.is_peak ? "danger" : "success"}
+                        variant={isPeak ? "danger" : "success"}
                         size="sm"
                       >
-                        {slot.is_peak ? "Peak" : "Off"}
+                        {slot.label ?? (isPeak ? "Peak" : "Off")}
                       </Badge>
                     </div>
-                    <div className="text-[10px] text-text-tertiary">
-                      {slot.expected_price_egp.toFixed(3)} EGP/kWh
+                    <div className="text-[10px] text-text-tertiary flex justify-between">
+                      <span>Avg:</span>
+                      <span className="font-mono text-text-primary">{(slot.expected_price_egp ?? slot.melting_avg_price_egp ?? 0).toFixed(2)}</span>
                     </div>
-                    {slot.recommended_action && (
-                      <div className={`text-[10px] font-medium ${slot.recommended_action === "RUN" ? "text-success" : "text-text-muted"}`}>
-                        {slot.recommended_action}
-                      </div>
-                    )}
+                    <div className="text-[10px] text-text-tertiary flex justify-between">
+                      <span>Cost:</span>
+                      <span className="font-mono text-text-primary">{slot.total_cost_egp ? Math.round(slot.total_cost_egp).toLocaleString() : '--'}</span>
+                    </div>
                   </div>
-                ))}
+                )})}
               </div>
             )}
           </CardContent>
