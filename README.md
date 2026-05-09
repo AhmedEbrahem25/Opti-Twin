@@ -1,53 +1,115 @@
+<div align="center">
+
 # Opti-Twin
 
-Autonomous energy intelligence for smart manufacturing, built for the
-NextCity AI Hack 2026.
+**Autonomous energy intelligence for smart manufacturing.**
 
-Opti-Twin is an industrial digital twin for Electric Arc Furnace (EAF)
-operations. It combines a physics-based factory simulator, a reinforcement
-learning decision layer, dynamic pricing controls, bilingual explainable AI,
-searchable decision history, and real-time dashboards.
+A production-grade industrial digital twin for Electric Arc Furnace operations, combining a physics-based simulator, reinforcement learning, dynamic pricing, bilingual explainable AI, and real-time dashboards.
 
-The demo target is Ezz Flat Steel, Ain Sokhna EAF #2: a 185-tonne furnace used
-as the reference facility for energy-cost, power-factor, equipment-safety, and
-production-throughput scenarios.
+Built for the **NextCity AI Hack 2026**. Reference facility: **Ezz Flat Steel, Ain Sokhna EAF #2** — a 185-tonne furnace.
 
-## What It Does
+[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Next.js](https://img.shields.io/badge/Next.js-14-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![Redis](https://img.shields.io/badge/Redis-Pub%2FSub-DC382D?logo=redis&logoColor=white)](https://redis.io/)
+[![Meilisearch](https://img.shields.io/badge/Meilisearch-Search-FF5CAA?logo=meilisearch&logoColor=white)](https://www.meilisearch.com/)
+[![PPO](https://img.shields.io/badge/RL-PPO-EE4C2C?logo=pytorch&logoColor=white)](https://stable-baselines3.readthedocs.io/)
 
-- Streams simulated EAF telemetry every few seconds.
-- Runs AI recommendations for arc power, cooling, power factor, and crisis
-  response.
-- Explains decisions in operator-friendly English and Arabic.
-- Models flat tariff, time-of-use, synthetic spot pricing, and demand response.
-- Tracks KPIs for energy cost, savings, production, safety, and revenue.
-- Indexes operational events for fast search and saved-search workflows.
-- Ships with two dashboards: the original live EAF dashboard and a newer
-  multi-factory SaaS-style dashboard.
+[Quick Start](#quick-start) · [Architecture](#architecture) · [API](#api-highlights) · [Demo Flow](#demo-flow) · [Docs](#more-documentation)
+
+</div>
+
+---
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Capabilities](#capabilities)
+3. [Architecture](#architecture)
+4. [Quick Start](#quick-start)
+5. [Service Topology](#service-topology)
+6. [Repository Layout](#repository-layout)
+7. [API Highlights](#api-highlights)
+8. [Local Frontend Development](#local-frontend-development)
+9. [Training Workflow](#training-workflow)
+10. [Configuration](#configuration)
+11. [Project Status](#project-status)
+12. [Demo Flow](#demo-flow)
+13. [More Documentation](#more-documentation)
+
+---
+
+## Overview
+
+Opti-Twin pairs a physics-grounded EAF simulator with a reinforcement-learning decision layer to optimise four objectives simultaneously:
+
+| Objective | Lever |
+| --- | --- |
+| **Energy cost** | Arc-power scheduling against time-of-use & spot pricing |
+| **Power factor** | Reactive compensation and tap setpoints |
+| **Equipment safety** | Cooling, electrode, transformer, wall-temperature limits |
+| **Production throughput** | Heat scheduling against demand-response windows |
+
+Every recommendation is explained in **English and Arabic**, indexed for fast retrieval, and rendered live across two purpose-built dashboards.
+
+---
+
+## Capabilities
+
+- **Telemetry streaming** — physics-based EAF state pushed every few seconds.
+- **AI control loop** — arc power, cooling, power factor, and crisis response.
+- **Bilingual XAI** — operator-grade explanations in English and Arabic.
+- **Dynamic pricing** — flat tariff, time-of-use, synthetic spot, and demand response.
+- **KPI tracking** — energy cost, savings, production, safety, revenue.
+- **Searchable history** — Meilisearch index over decisions and operational events.
+- **Two dashboards** — the original live EAF view and a multi-factory SaaS-style view.
+
+---
 
 ## Architecture
 
 ```text
-simulator -> redis -> ai_engine -> backend -> dashboards
-                |          |          |
-                |          |          +-- FastAPI REST + WebSocket
-                |          +------------- PPO/scripted policy + XAI + safety
-                +------------------------ Pub/Sub event stream
-
-meilisearch <--------------------------- searchable decision/event history
+                 ┌──────────────┐
+                 │  Simulator   │  Physics-grounded EAF telemetry
+                 └──────┬───────┘
+                        │ pub
+                ┌───────▼────────┐
+                │     Redis      │  Pub/Sub broker
+                └───┬────────┬───┘
+                    │        │
+              sub   │        │   sub
+            ┌───────▼──┐  ┌──▼──────────┐
+            │ AI Engine│  │  Backend    │  FastAPI REST + WebSocket
+            │  PPO/    │  │  KPIs,      │
+            │  Scripted│  │  Pricing,   │
+            │  + XAI   │  │  Logs,      │
+            │  + Safety│  │  Search     │
+            └─────┬────┘  └──┬───────┬──┘
+                  │          │       │
+                  └────┬─────┘       │
+                       │             │
+               ┌───────▼─────┐  ┌────▼────────┐
+               │ Meilisearch │  │ Dashboards  │
+               │  (history)  │  │  3000/3001  │
+               └─────────────┘  └─────────────┘
 ```
 
-The main runnable stack lives in `opti-twin/` and is orchestrated with Docker
-Compose.
+The runnable stack lives in [`opti-twin/`](opti-twin/) and is orchestrated by Docker Compose.
+
+> See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the deep-dive.
+
+---
 
 ## Quick Start
 
-Prerequisites:
+### Prerequisites
 
-- Docker Desktop or Docker Engine with Compose
-- Optional for frontend-only development: Node.js 20+
-- Optional for Python development/training: Python 3.11+
+- **Docker Desktop** or Docker Engine with Compose
+- *Optional* — Node.js 20+ for frontend-only development
+- *Optional* — Python 3.11+ for AI engine development or training
 
-Run the full demo stack:
+### Run the demo stack
 
 ```bash
 cd opti-twin
@@ -55,62 +117,69 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Open:
+### Open
 
 | Service | URL |
 | --- | --- |
-| Original EAF dashboard | http://localhost:3000 |
-| New multi-factory dashboard | http://localhost:3001 |
-| Backend API docs | http://localhost:8000/docs |
-| Backend health/root | http://localhost:8000/ |
+| Original EAF dashboard | <http://localhost:3000> |
+| Multi-factory dashboard | <http://localhost:3001> |
+| Backend Swagger docs | <http://localhost:8000/docs> |
+| Backend health/root | <http://localhost:8000/> |
 
-Stop the stack:
+### Tear down
 
 ```bash
 docker compose down
 ```
 
-## Main Services
+---
+
+## Service Topology
 
 | Service | Path | Purpose |
 | --- | --- | --- |
 | `simulator` | `opti-twin/simulator/` | Physics-grounded EAF telemetry, crisis events, tariff context |
 | `redis` | Docker image | Pub/Sub broker for telemetry, AI decisions, pricing, and logs |
 | `ai_engine` | `opti-twin/ai_engine/` | Gymnasium environment, PPO/scripted policy, safety mask, XAI |
-| `backend` | `opti-twin/backend/` | FastAPI gateway, WebSocket feed, KPIs, pricing, logs, search routes |
-| `meilisearch` | Docker image | Internal search index for decisions and operational events |
-| `frontend` | `opti-twin/frontend/` | Original Next.js EAF dashboard on port 3000 |
-| `frontend_app` | `frontend-app/` | New Next.js multi-factory dashboard on port 3001 |
+| `backend` | `opti-twin/backend/` | FastAPI gateway, WebSocket feed, KPIs, pricing, logs, search |
+| `meilisearch` | Docker image | Search index for decisions and operational events |
+| `frontend` | `opti-twin/frontend/` | Original Next.js EAF dashboard — port 3000 |
+| `frontend_app` | `frontend-app/` | Multi-factory Next.js dashboard — port 3001 |
+
+---
 
 ## Repository Layout
 
 ```text
 .
-|-- README.md                 # This file
-|-- ARCHITECTURE.md           # Detailed architecture notes
-|-- plan.md                   # Evidence-backed master plan
-|-- planing-v2.md             # AI/model roadmap
-|-- report.md                 # Full project report
-|-- simulations.md            # Simulation notes
-|-- upgrade.md                # Search/product upgrade notes
-|-- frontend-app/             # New Next.js app
-`-- opti-twin/
-    |-- docker-compose.yml    # Full stack orchestration
-    |-- .env.example          # Runtime configuration template
-    |-- README.md             # Stack-specific quick start and training commands
-    |-- JUDGES_BRIEF.md       # Demo/pitch reference
-    |-- GUIDE_AR.md           # Arabic operator/project guide
-    |-- HOW_AI_WORKS_AR.md    # Arabic AI explainer
-    |-- ai_engine/            # RL, forecasting, anomaly, reward, XAI
-    |-- backend/              # FastAPI, pricing, search, KPI services
-    |-- data/                 # Tariffs, model/data artifacts, Meili data
-    |-- frontend/             # Original dashboard
-    `-- simulator/            # EAF simulator
+├── README.md                 # You are here
+├── ARCHITECTURE.md           # Detailed architecture notes
+├── plan.md                   # Evidence-backed master plan
+├── planing-v2.md             # AI / model roadmap
+├── report.md                 # Full project report
+├── simulations.md            # Simulation notes
+├── upgrade.md                # Search / product upgrade notes
+├── frontend-app/             # Multi-factory Next.js dashboard
+└── opti-twin/
+    ├── docker-compose.yml    # Full-stack orchestration
+    ├── .env.example          # Runtime configuration template
+    ├── README.md             # Stack-specific quick start & training commands
+    ├── JUDGES_BRIEF.md       # Demo / pitch reference
+    ├── ai_engine/            # RL, forecasting, anomaly, reward, XAI
+    ├── backend/              # FastAPI, pricing, search, KPI services
+    ├── data/                 # Tariffs, model/data artifacts, Meili data
+    ├── frontend/             # Original dashboard
+    └── simulator/            # EAF simulator
 ```
+
+---
 
 ## API Highlights
 
-The backend exposes REST endpoints and a live WebSocket stream:
+The backend exposes a REST surface plus a live WebSocket stream. Full Swagger UI at <http://localhost:8000/docs>.
+
+<details open>
+<summary><b>Telemetry & Recommendations</b></summary>
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -118,25 +187,51 @@ The backend exposes REST endpoints and a live WebSocket stream:
 | `POST` | `/api/v1/telemetry` | Ingest simulator telemetry |
 | `GET` | `/api/v1/recommendation` | Last AI recommendation |
 | `GET` | `/api/v1/stats` | KPI snapshot |
+| `WS`  | `/ws/live-feed` | Real-time telemetry & recommendation stream |
+
+</details>
+
+<details open>
+<summary><b>AI Control</b></summary>
+
+| Method | Path | Purpose |
+| --- | --- | --- |
 | `POST` | `/api/v1/ai/toggle` | Enable or disable AI control |
 | `POST` | `/api/v1/ai/profile` | Switch reward profile |
 | `POST` | `/api/v1/sim/inject` | Inject simulator crisis event |
+
+</details>
+
+<details open>
+<summary><b>Pricing & Demand Response</b></summary>
+
+| Method | Path | Purpose |
+| --- | --- | --- |
 | `POST` | `/api/v1/tariff/mode` | Toggle tariff mode |
-| `GET` | `/api/v1/pricing/live` | Current price signal |
-| `GET` | `/api/v1/pricing/forecast` | Forecast price curve |
-| `GET` | `/api/v1/pricing/revenue` | Revenue stack snapshot |
-| `GET` | `/api/v1/pricing/schedule` | Heat schedule recommendation |
+| `GET`  | `/api/v1/pricing/live` | Current price signal |
+| `GET`  | `/api/v1/pricing/forecast` | Forecast price curve |
+| `GET`  | `/api/v1/pricing/revenue` | Revenue stack snapshot |
+| `GET`  | `/api/v1/pricing/schedule` | Heat schedule recommendation |
 | `POST` | `/api/v1/pricing/dr/inject` | Inject a demand-response event |
-| `GET` | `/api/v1/pricing/dr/events` | Demand-response event history |
+| `GET`  | `/api/v1/pricing/dr/events` | Demand-response event history |
+
+</details>
+
+<details open>
+<summary><b>Logs & Search</b></summary>
+
+| Method | Path | Purpose |
+| --- | --- | --- |
 | `GET` | `/api/v1/logs` | Query in-memory logs |
 | `GET` | `/api/v1/search` | Search indexed operational events |
-| `WS` | `/ws/live-feed` | Real-time telemetry and recommendation stream |
 
-Swagger UI is available at `http://localhost:8000/docs` after the stack starts.
+</details>
+
+---
 
 ## Local Frontend Development
 
-Run the new dashboard directly:
+### Multi-factory dashboard (port 3001)
 
 ```bash
 cd frontend-app
@@ -145,14 +240,14 @@ npm install
 npm run dev
 ```
 
-By default, this app expects:
+Default environment:
 
 ```env
 NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
 NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws/live-feed
 ```
 
-Run the original dashboard directly:
+### Original dashboard (port 3000)
 
 ```bash
 cd opti-twin/frontend
@@ -160,39 +255,42 @@ npm install
 npm run dev
 ```
 
+---
+
 ## Training Workflow
 
-The training container is gated behind a Compose profile so normal demos do not
-start long ML jobs.
-
-Example:
+The training container is gated behind a Compose profile so demos do not start long ML jobs.
 
 ```bash
 cd opti-twin
 docker compose --profile training run --rm trainer train_ppo.py --help
 ```
 
-The stack-specific `opti-twin/README.md` contains the full collect, split,
-train, and evaluate command sequence.
+The full **collect → split → train → evaluate** sequence lives in [`opti-twin/README.md`](opti-twin/README.md).
+
+---
 
 ## Configuration
 
-Copy `opti-twin/.env.example` to `opti-twin/.env` and adjust values as needed.
-Important groups include:
+Copy `opti-twin/.env.example` to `opti-twin/.env` and tune as needed. Key groups:
 
-- Redis and service host settings
-- EAF physical limits and furnace sizing
-- Egypt industrial tariff assumptions
-- RL reward weights: `RL_ALPHA` through `RL_ZETA`
-- Dynamic Pricing Engine settings: `DPE_*`
-- Search settings: `SEARCH_ENABLED`, `MEILI_MASTER_KEY`
-- Optional LLM XAI setting: `ANTHROPIC_API_KEY`
+| Group | Keys |
+| --- | --- |
+| Infrastructure | Redis & service host settings |
+| Physical model | EAF physical limits and furnace sizing |
+| Tariff | Egypt industrial tariff assumptions |
+| RL reward | `RL_ALPHA` … `RL_ZETA` |
+| Pricing engine | `DPE_*` |
+| Search | `SEARCH_ENABLED`, `MEILI_MASTER_KEY` |
+| Optional LLM XAI | `ANTHROPIC_API_KEY` |
 
-Defaults are chosen so the demo runs locally without external services.
+> Defaults are tuned so the demo runs locally without external services.
+
+---
 
 ## Project Status
 
-Built and runnable:
+### Built & runnable
 
 - Dockerized simulator, Redis, backend, AI engine, Meilisearch, and dashboards
 - Live telemetry and WebSocket updates
@@ -202,33 +300,46 @@ Built and runnable:
 - Search routes and saved-search UX
 - Training pipeline scaffolding and model artifact folders
 
-Important caveats:
+### Caveats
 
-- The demo can fall back to a scripted decision policy when trained PPO weights
-  are absent or not selected.
+- The demo can fall back to a scripted policy when trained PPO weights are absent or not selected.
 - The simulator is not a real SCADA connection.
 - Dynamic spot pricing is synthetic unless a real market connector is added.
-- Data persistence is demo-oriented; check storage settings before production
-  deployment.
+- Data persistence is demo-oriented — review storage settings before production deployment.
+
+---
 
 ## Demo Flow
 
-1. Start the stack with `docker compose up --build`.
-2. Open `http://localhost:3000` or `http://localhost:3001`.
-3. Watch baseline furnace telemetry and KPIs.
-4. Enable the AI control flow.
-5. Toggle tariff or pricing scenarios.
-6. Inject a crisis such as wall overheat, grid spike, or transformer alarm.
-7. Use search to find decisions, crises, and safety events.
-8. Close with the KPI and revenue summary.
+| Step | Action |
+| ---: | --- |
+| 1 | `docker compose up --build` |
+| 2 | Open <http://localhost:3000> or <http://localhost:3001> |
+| 3 | Watch baseline furnace telemetry and KPIs |
+| 4 | Enable the AI control flow |
+| 5 | Toggle tariff or pricing scenarios |
+| 6 | Inject a crisis (wall overheat, grid spike, transformer alarm) |
+| 7 | Search decisions, crises, and safety events |
+| 8 | Close with the KPI and revenue summary |
+
+---
 
 ## More Documentation
 
-- `report.md` - full project report
-- `ARCHITECTURE.md` - detailed technical architecture
-- `opti-twin/JUDGES_BRIEF.md` - hackathon demo script and Q&A
-- `plan.md` - evidence-backed business and implementation plan
-- `planing-v2.md` - model roadmap
-- `upgrade.md` - search/product upgrade notes
-- `opti-twin/GUIDE_AR.md` - Arabic project guide
-- `opti-twin/HOW_AI_WORKS_AR.md` - Arabic AI explanation
+| Document | Purpose |
+| --- | --- |
+| [`report.md`](report.md) | Full project report |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Detailed technical architecture |
+| [`opti-twin/JUDGES_BRIEF.md`](opti-twin/JUDGES_BRIEF.md) | Hackathon demo script & Q&A |
+| [`plan.md`](plan.md) | Evidence-backed business and implementation plan |
+| [`planing-v2.md`](planing-v2.md) | Model roadmap |
+| [`upgrade.md`](upgrade.md) | Search / product upgrade notes |
+| [`simulations.md`](simulations.md) | Simulation notes |
+
+---
+
+<div align="center">
+
+**Opti-Twin** — built for **NextCity AI Hack 2026**.
+
+</div>
